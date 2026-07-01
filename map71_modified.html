@@ -11005,111 +11005,125 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   };
 
   // ════ جمع حالة اللعبة الكاملة (للمقدم) ════
+  // ════ جمع حالة اللعبة (للمقدم) ════
   function awCollectState() {
     try {
-      const htmlSnaps = {};
-      ['splash', 'settings', 'game', 'gameOver'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        // لشاشة game، أرسل فقط الكلاسات + الشاشات الداخلية النشطة (بدون SVG الخريطة الثقيل)
-        if (id === 'game') {
-          const inner = {};
-          // الشاشات الداخلية
-          ['questionScreen','numbersScreen','categoryModal',
-           'conquerModal','countryInfo','turnInd','backButton',
-           'continentList','scoreboard','scorePanel'].forEach(innerId => {
-            const innerEl = document.getElementById(innerId);
-            if (innerEl) inner[innerId] = { cls: innerEl.className, html: innerEl.innerHTML.slice(0, 10000) };
-          });
-          // ألوان الدول
-          const countryColors = {};
-          document.querySelectorAll('[class*="occupied-"]').forEach(el => {
-            const name = el.id || el.getAttribute('data-name');
-            if (!name) return;
-            const cls = el.className?.baseVal || el.className || '';
-            if (cls.includes('occupied-blue')) countryColors[name] = 'b';
-            else if (cls.includes('occupied-red')) countryColors[name] = 'r';
-          });
-          htmlSnaps[id] = { cls: el.className, inner, countryColors };
-        } else {
-          htmlSnaps[id] = { cls: el.className, html: el.innerHTML.slice(0, 20000) };
-        }
-      });
-      return { htmlSnaps, ts: Date.now() };
-    } catch(e) { console.warn('[AW] collectState error:', e); return null; }
+      const gameEl = document.getElementById('game');
+      const gameOverEl = document.getElementById('gameOver');
+      const isInGame = gameEl?.classList.contains('active');
+      const isGameOver = gameOverEl?.classList.contains('active');
+
+      const state = {
+        screen: isInGame ? 'game' : isGameOver ? 'gameOver' : 'settings',
+        teams: {
+          blue: document.getElementById('nameBlue')?.value || 'الفريق الأزرق',
+          red: document.getElementById('nameRed')?.value || 'الفريق الأحمر'
+        },
+        ts: Date.now()
+      };
+
+      if (isInGame) {
+        // النتائج
+        state.scores = {
+          b: teams?.blue?.score || 0,
+          r: teams?.red?.score || 0,
+          bc: teams?.blue?.countries || 0,
+          rc: teams?.red?.countries || 0
+        };
+        // الشاشة النشطة
+        const qEl = document.getElementById('questionScreen');
+        const nEl = document.getElementById('numbersScreen');
+        const cEl = document.getElementById('categoryModal');
+        state.panel = qEl?.classList.contains('active') ? 'q'
+          : nEl?.classList.contains('active') ? 'n'
+          : cEl?.classList.contains('active') ? 'c' : 'm';
+        if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0,12000);
+        if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0,12000);
+        if (state.panel === 'c') state.ph = cEl.innerHTML.slice(0,12000);
+        // ألوان الدول
+        const col = {};
+        document.querySelectorAll('[class*="occupied-"]').forEach(el => {
+          if (!el.id) return;
+          const c = el.className?.baseVal || el.className || '';
+          if (c.includes('occupied-blue')) col[el.id] = 'b';
+          else if (c.includes('occupied-red')) col[el.id] = 'r';
+        });
+        state.col = col;
+      }
+      return state;
+    } catch(e) { return null; }
   }
 
+  // ════ إرسال الحالة ════
   function awSendState() {
     if (!awIsHost || !awRoomRef) return;
     const state = awCollectState();
     if (!state) return;
-    console.log('[AW host] sending state, settings cls:', state.htmlSnaps?.settings?.cls, 'game cls:', state.htmlSnaps?.game?.cls);
-    awRoomRef.child('state').set(state).catch(e => console.warn('[AW] send error:', e));
+    awRoomRef.child('state').set(state).catch(() => {});
   }
 
-  // ════ مراقبة تغييرات DOM (إضافية للمقدم) ════
+  // ════ مراقبة تغييرات DOM ════
   function awWatchDomChanges() {
     const observer = new MutationObserver(() => {
       clearTimeout(window._awMutTimer);
-      window._awMutTimer = setTimeout(awSendState, 200);
+      window._awMutTimer = setTimeout(awSendState, 300);
     });
     observer.observe(document.body, {
       childList: true, subtree: true,
-      attributes: true, attributeFilter: ['class', 'style']
+      attributes: true, attributeFilter: ['class']
     });
   }
 
+  // ════ تطبيق الحالة عند المشاهد ════
   function awApplyState(state) {
-    if (!awIsViewer || !state?.htmlSnaps) return;
+    if (!awIsViewer || !state) return;
     try {
-      const snaps = state.htmlSnaps;
-      console.log('[AW viewer] applying state, keys:', Object.keys(snaps),
-        'settings cls:', snaps.settings?.cls,
-        'game cls:', snaps.game?.cls);
-
-      // الشاشات غير game
-      ['splash','settings','gameOver'].forEach(id => {
-        const el = document.getElementById(id);
-        const data = snaps[id];
-        if (!el || !data) return;
-        if (el.className !== data.cls) {
-          console.log('[AW viewer]', id, 'class:', el.className, '→', data.cls);
-          el.className = data.cls;
-        }
-        if (data.html !== undefined && el.innerHTML !== data.html) el.innerHTML = data.html;
-      });
-
-      // شاشة game
-      const gameEl = document.getElementById('game');
-      const gameData = snaps.game;
-      if (gameEl && gameData) {
-        if (gameEl.className !== gameData.cls) {
-          console.log('[AW viewer] game class:', gameEl.className, '→', gameData.cls);
-          gameEl.className = gameData.cls;
+      if (state.screen === 'game') {
+        const gameEl = document.getElementById('game');
+        // إذا اللعبة لم تبدأ بعد عند المشاهد، ابدأها
+        if (!gameEl?.classList.contains('active')) {
+          // ضبط أسماء الفرق قبل البدء
+          if (state.teams) {
+            const nb = document.getElementById('nameBlue');
+            const nr = document.getElementById('nameRed');
+            if (nb) nb.value = state.teams.blue;
+            if (nr) nr.value = state.teams.red;
+          }
+          if (typeof startGame === 'function') startGame();
+          return; // انتظر الاستدعاء التالي بعد تحميل الخريطة
         }
 
-        // تطبيق ألوان الدول على الخريطة
-        if (gameData.countryColors) {
-          Object.entries(gameData.countryColors).forEach(([name, color]) => {
-            const el = document.getElementById(name);
+        // تطبيق ألوان الدول
+        if (state.col) {
+          Object.entries(state.col).forEach(([id, c]) => {
+            const el = document.getElementById(id);
             if (!el) return;
             el.classList.remove('occupied-blue','occupied-red');
-            if (color === 'b') el.classList.add('occupied-blue');
-            else if (color === 'r') el.classList.add('occupied-red');
+            if (c === 'b') el.classList.add('occupied-blue');
+            else if (c === 'r') el.classList.add('occupied-red');
           });
         }
 
-        // تطبيق الشاشات الداخلية
-        if (gameData.inner) {
-          Object.entries(gameData.inner).forEach(([innerId, data]) => {
-            const innerEl = document.getElementById(innerId);
-            if (!innerEl || !data) return;
-            if (innerEl.className !== data.cls) innerEl.className = data.cls;
-            if (data.html !== undefined && innerEl.innerHTML !== data.html) innerEl.innerHTML = data.html;
-          });
+        // تطبيق الشاشة النشطة
+        const qEl = document.getElementById('questionScreen');
+        const nEl = document.getElementById('numbersScreen');
+        const cEl = document.getElementById('categoryModal');
+        [qEl, nEl, cEl].forEach(el => el?.classList.remove('active'));
+
+        if (state.panel === 'q' && state.ph && qEl) {
+          qEl.innerHTML = state.ph; qEl.classList.add('active');
+        } else if (state.panel === 'n' && state.ph && nEl) {
+          nEl.innerHTML = state.ph; nEl.classList.add('active');
+        } else if (state.panel === 'c' && state.ph && cEl) {
+          cEl.innerHTML = state.ph; cEl.classList.add('active');
         }
       }
-    } catch(e) { console.warn('[AW viewer] apply error:', e); }
+
+      if (state.screen === 'gameOver') {
+        document.getElementById('gameOver')?.classList.add('active');
+        document.getElementById('game')?.classList.remove('active');
+      }
+    } catch(e) { console.warn('[AW viewer] error:', e); }
   }
 
   // ════ بدء إنشاء الغرفة تلقائياً (لوحة المقدم) ════
