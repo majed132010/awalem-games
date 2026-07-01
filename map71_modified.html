@@ -11137,105 +11137,20 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 })();
 
 </script>
-  <script>
-/* ===== DOM SYNC — مزامنة التلوين ===== */
+ <script>
+/* ===== إرسال بيانات الغرفة إلى الصفحة الأم ===== */
 (function(){
-  'use strict';
-  
-  var db, room, isHost, ok = false;
-  var CHECK_MS = 500;
-  var MAX_WAIT = 60000;
-  var waited = 0;
-  
-  function log(){
-    var args = ['[DOMSync]'];
-    for(var i = 0; i < arguments.length; i++) args.push(arguments[i]);
-    console.log.apply(console, args);
-  }
-  
-  function check(){
-    if(ok) return;
-    
-    db = window.awDb;
-    room = window.awRoomCode;
-    isHost = window.awIsHost;
-    
-    if(db && room != null && isHost != null){
-      ok = true;
-      log('READY', isHost ? 'HOST' : 'VIEWER', 'room=' + room);
-      isHost ? startHost() : startViewer();
-      return;
-    }
-    
-    waited += CHECK_MS;
-    if(waited < MAX_WAIT){
-      setTimeout(check, CHECK_MS);
-    } else {
-      log('TIMEOUT - vars not found:', 'db=' + !!db, 'room=' + room, 'host=' + isHost);
+  function send(){
+    if(window.parent !== window && window.awRoomCode != null){
+      window.parent.postMessage({
+        type: 'awGameData',
+        room: window.awRoomCode,
+        host: window.awIsHost
+      }, '*');
     }
   }
-  
-  /* ─── HOST ─── */
-  function startHost(){
-    log('Starting color sync as HOST');
-    var lastColors = {};
-    
-    setInterval(function(){
-      var paths = document.querySelectorAll('path[data-eng]');
-      var count = 0;
-      
-      for(var i = 0; i < paths.length; i++){
-        var p = paths[i];
-        var country = p.getAttribute('data-eng');
-        if(!country) continue;
-        
-        var cls = p.className;
-        if(typeof cls === 'object' && cls.baseVal != null) cls = cls.baseVal;
-        cls = ' ' + (cls || '') + ' ';
-        
-        var color = '';
-        if(cls.indexOf(' occupied-blue ') > -1) color = 'blue';
-        else if(cls.indexOf(' occupied-red ') > -1) color = 'red';
-        else if(cls.indexOf(' occupied-green ') > -1) color = 'green';
-        else if(cls.indexOf(' occupied-yellow ') > -1) color = 'yellow';
-        
-        if(color && lastColors[country] !== color){
-          lastColors[country] = color;
-          db.ref('rooms/' + room + '/domSync/colors/' + country).set(color);
-          count++;
-        }
-      }
-      
-      if(count > 0) log('Sent', count, 'colors');
-    }, 400);
-  }
-  
-  /* ─── VIEWER ─── */
-  function startViewer(){
-    log('Starting color sync as VIEWER');
-    
-    db.ref('rooms/' + room + '/domSync/colors').on('value', function(snap){
-      var colors = snap.val();
-      if(!colors) return;
-      
-      var count = 0;
-      for(var country in colors){
-        var color = colors[country];
-        var paths = document.querySelectorAll('path[data-eng="' + country + '"]');
-        
-        for(var i = 0; i < paths.length; i++){
-          var p = paths[i];
-          p.classList.remove('occupied-blue', 'occupied-red', 'occupied-green', 'occupied-yellow');
-          if(color) p.classList.add('occupied-' + color);
-          count++;
-        }
-      }
-      
-      if(count > 0) log('Applied', count, 'paths');
-    });
-  }
-  
-  check();
+  send();
+  setInterval(send, 800);
 })();
 </script>
 </body>
