@@ -10967,8 +10967,10 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       awIsViewer = true;
 
       // تسجيل المشاهد وتقليل العداد عند الخروج
-      await awRoomRef.child('viewers').transaction(v => (v || 0) + 1);
-      awRoomRef.child('viewers').onDisconnect().transaction(v => Math.max(0, (v || 1) - 1));
+      const viewersRef = awRoomRef.child('viewers');
+      const snap2 = await viewersRef.once('value');
+      await viewersRef.set((snap2.val() || 0) + 1);
+      viewersRef.onDisconnect().set(Math.max(0, (snap2.val() || 1) - 1));
 
       setTimeout(() => {
         document.getElementById('awGameRoom').classList.add('hidden');
