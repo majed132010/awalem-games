@@ -10965,8 +10965,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         statusEl.className = 'aw-status error'; return;
       }
 
-      statusEl.textContent = '✅ تم الانضمام! جاري التحميل...';
-      statusEl.className = 'aw-status success';
+      statusEl.textContent = '⏳ جاري الانتظار حتى يبدأ المقدم...';
+      statusEl.className = 'aw-status';
 
       awRoomCode = code;
       awRoomRef = awDb.ref('game_rooms/' + code);
@@ -10978,18 +10978,24 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       await viewersRef.set((snap2.val() || 0) + 1);
       viewersRef.onDisconnect().set(Math.max(0, (snap2.val() || 1) - 1));
 
-      setTimeout(() => {
-        document.getElementById('awGameRoom').classList.add('hidden');
-        document.getElementById('awViewerBar').classList.add('show');
-        document.getElementById('awHostCode').textContent = 'كود: ' + code;
-        document.body.classList.add('aw-viewer-mode');
-        // الاستماع للحالة من المقدم
-        awRoomRef.child('state').on('value', snap => {
-          const state = snap.val();
-          console.log('[AW] State received:', !!state);
-          if (state) awApplyState(state);
-        });
-      }, 600);
+      // انتظر حتى يصل أول state حقيقي من المقدم قبل الدخول
+      let enteredGame = false;
+      awRoomRef.child('state').on('value', snap => {
+        const state = snap.val();
+        console.log('[AW] State received:', !!state);
+        if (!state) return;
+
+        if (!enteredGame) {
+          enteredGame = true;
+          // أول حالة تصل → أدخل للعبة
+          document.getElementById('awGameRoom').classList.add('hidden');
+          document.getElementById('awViewerBar').classList.add('show');
+          document.getElementById('awHostCode').textContent = 'كود: ' + code;
+          document.body.classList.add('aw-viewer-mode');
+        }
+
+        awApplyState(state);
+      });
 
     } catch(err) {
       console.error('[AW] Join error:', err);
@@ -11053,18 +11059,23 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     });
   }
 
-  // ════ تطبيق الحالة عند المشاهد ════
   function awApplyState(state) {
     if (!awIsViewer || !state?.htmlSnaps) return;
     try {
       const snaps = state.htmlSnaps;
+      console.log('[AW viewer] applying state, keys:', Object.keys(snaps),
+        'settings cls:', snaps.settings?.cls,
+        'game cls:', snaps.game?.cls);
 
       // الشاشات غير game
       ['splash','settings','gameOver'].forEach(id => {
         const el = document.getElementById(id);
         const data = snaps[id];
         if (!el || !data) return;
-        if (el.className !== data.cls) el.className = data.cls;
+        if (el.className !== data.cls) {
+          console.log('[AW viewer]', id, 'class:', el.className, '→', data.cls);
+          el.className = data.cls;
+        }
         if (data.html !== undefined && el.innerHTML !== data.html) el.innerHTML = data.html;
       });
 
@@ -11072,7 +11083,10 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       const gameEl = document.getElementById('game');
       const gameData = snaps.game;
       if (gameEl && gameData) {
-        if (gameEl.className !== gameData.cls) gameEl.className = gameData.cls;
+        if (gameEl.className !== gameData.cls) {
+          console.log('[AW viewer] game class:', gameEl.className, '→', gameData.cls);
+          gameEl.className = gameData.cls;
+        }
 
         // تطبيق ألوان الدول على الخريطة
         if (gameData.countryColors) {
