@@ -11135,465 +11135,59 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   });
 
 })();
-</script>
-    <!-- ============================================================ -->
-<!-- 📡 SCREEN SYNC SYSTEM — نظام نقل الشاشة المباشر (WebRTC)      -->
-<!-- يُضاف في نهاية <body> مباشرة قبل </body>                       -->
-<!-- يعتمد على: window.awRoomCode, window.awIsHost, window.awDb      -->
-<!-- ============================================================ -->
-<script>
-(function ScreenSyncSystem() {
-  'use strict';
 
-  /* ─── إعدادات ─── */
-  var ICE_SERVERS = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ];
-  var SYNC_NODE = 'screenSync';
-
-  /* ─── انتظار الجاهزية ─── */
-  var waitTimer = setInterval(function() {
-    if (window.awDb && window.awRoomCode != null && window.awIsHost != null) {
-      clearInterval(waitTimer);
-      boot();
-    }
-  }, 400);
-
-  /* ─── التشغيل ─── */
-  function boot() {
-    var isHost = window.awIsHost;
-    var room   = window.awRoomCode;
-    var db     = window.awDb;
-    var syncRef = db.ref('rooms/' + room + '/' + SYNC_NODE);
-
-    // تنظيف قديم
-    syncRef.remove().catch(function(){});
-
-    if (isHost) {
-      initHost(syncRef);
-    } else {
-      initViewer(syncRef);
-    }
-  }
-
-  /* ═══════════════════════════════════════════
-     HOST (المقدم)
-     ═══════════════════════════════════════════ */
-  function initHost(syncRef) {
-    injectHostStyles();
-    var btn = document.createElement('button');
-    btn.id = 'ssHostBtn';
-    btn.className = 'ss-host-btn';
-    btn.innerHTML = '<span>📡</span><span>ابدأ البث</span>';
-    btn.onclick = function() { onHostStart(syncRef, btn); };
-    document.body.appendChild(btn);
-  }
-
-  async function onHostStart(syncRef, btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span>⏳</span><span>جاري...</span>';
-
-    var stream = null;
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: 1280, height: 720, frameRate: 15 },
-        audio: false
-      });
-    } catch (e) {
-      console.error('[SS] Capture failed', e);
-      btn.disabled = false;
-      btn.innerHTML = '<span>❌</span><span>أعد المحاولة</span>';
-      setTimeout(function(){ btn.innerHTML = '<span>📡</span><span>ابدأ البث</span>'; }, 2500);
-      return;
-    }
-
-    // زر الإيقاف
-    btn.disabled = false;
-    btn.className = 'ss-host-btn ss-host-live';
-    btn.innerHTML = '<span>🔴</span><span>إيقاف البث</span>';
-    btn.onclick = function() { stopHost(stream, pc, syncRef, btn); };
-
-    var pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    window._ssHostPC = pc;
-
-    stream.getTracks().forEach(function(t){ pc.addTrack(t, stream); });
-
-    pc.onicecandidate = function(evt) {
-      if (evt.candidate) syncRef.child('hostIce').push(evt.candidate.toJSON());
-    };
-
-    var offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await syncRef.child('offer').set(offer.toJSON());
-
-    syncRef.child('answer').on('value', async function(snap) {
-      var ans = snap.val();
-      if (ans && pc.signalingState === 'have-local-offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(ans));
-        btn.innerHTML = '<span>🔴</span><span>بث مباشر</span>';
-      }
-    });
-
-    syncRef.child('viewerIce').on('child_added', async function(snap) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(snap.val())); } catch(e){}
-    });
-
-    stream.getVideoTracks()[0].onended = function() {
-      stopHost(stream, pc, syncRef, btn);
-    };
-  }
-
-  function stopHost(stream, pc, syncRef, btn) {
-    if (stream) stream.getTracks().forEach(function(t){ t.stop(); });
-    if (pc) pc.close();
-    syncRef.remove().catch(function(){});
-    btn.className = 'ss-host-btn';
-    btn.innerHTML = '<span>📡</span><span>ابدأ البث</span>';
-    btn.onclick = function(){ onHostStart(syncRef, btn); };
-    window._ssHostPC = null;
-  }
-
-  /* ═══════════════════════════════════════════
-     VIEWER (المشاهد)
-     ═══════════════════════════════════════════ */
-  function initViewer(syncRef) {
-    injectViewerStyles();
-    buildViewerOverlay();
-
-    var pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    window._ssViewerPC = pc;
-
-    var video = document.getElementById('ssVideo');
-    var statusEl = document.getElementById('ssStatus');
-
-    pc.ontrack = function(evt) {
-      if (video.srcObject !== evt.streams[0]) {
-        video.srcObject = evt.streams[0];
-        video.play().catch(function(){});
-        if (statusEl) statusEl.textContent = '🔴 بث مباشر';
-        var wait = document.getElementById('ssWait');
-        if (wait) wait.style.display = 'none';
-      }
-    };
-
-    pc.onicecandidate = function(evt) {
-      if (evt.candidate) syncRef.child('viewerIce').push(evt.candidate.toJSON());
-    };
-
-    syncRef.child('offer').on('value', async function(snap) {
-      var offer = snap.val();
-      if (!offer || pc.signalingState !== 'stable') return;
-      try {
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        var answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await syncRef.child('answer').set(answer.toJSON());
-      } catch (e) { console.error('[SS] Answer error', e); }
-    });
-
-    syncRef.child('hostIce').on('child_added', async function(snap) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(snap.val())); } catch(e){}
-    });
-
-    pc.onconnectionstatechange = function() {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        if (statusEl) statusEl.textContent = '⚠️ انقطع الاتصال';
-      }
-    };
-  }
-
-  function buildViewerOverlay() {
-    if (document.getElementById('ssOverlay')) return;
-    var el = document.createElement('div');
-    el.id = 'ssOverlay';
-    el.className = 'ss-overlay';
-    el.innerHTML =
-      '<div class="ss-bar">' +
-        '<div class="ss-bar-title">📺 شاشة المقدم</div>' +
-        '<div class="ss-bar-status" id="ssStatus">⏳ في الانتظار...</div>' +
-        '<button class="ss-close" id="ssCloseBtn" title="إغلاق">✕</button>' +
-      '</div>' +
-      '<div class="ss-stage">' +
-        '<video id="ssVideo" autoplay playsinline muted></video>' +
-        '<div class="ss-wait" id="ssWait">' +
-          '<div class="ss-wait-icon">⏳</div>' +
-          '<div class="ss-wait-text">في انتظار المقدم...</div>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(el);
-
-    var video = document.getElementById('ssVideo');
-    video.addEventListener('loadedmetadata', function() {
-      var w = document.getElementById('ssWait');
-      if (w) w.style.display = 'none';
-    });
-
-    document.getElementById('ssCloseBtn').onclick = function() {
-      el.remove();
-      if (window._ssViewerPC) { window._ssViewerPC.close(); window._ssViewerPC = null; }
-    };
-  }
-
-  /* ═══════════════════════════════════════════
-     Styles
-     ═══════════════════════════════════════════ */
-  function injectHostStyles() {
-    if (document.getElementById('ssHostStyle')) return;
-    var s = document.createElement('style');
-    s.id = 'ssHostStyle';
-    s.textContent =
-      '.ss-host-btn{' +
-        'position:fixed!important;bottom:20px!important;left:20px!important;' +
-        'z-index:99999!important;display:flex!important;align-items:center!important;' +
-        'gap:8px!important;padding:12px 22px!important;' +
-        'background:linear-gradient(135deg,#1a6060,#0d4545)!important;' +
-        'color:#c8a84b!important;border:2px solid rgba(200,168,75,0.4)!important;' +
-        'border-radius:50px!important;font-family:Tajawal,sans-serif!important;' +
-        'font-size:14px!important;font-weight:700!important;cursor:pointer!important;' +
-        'box-shadow:0 4px 20px rgba(0,0,0,0.4)!important;' +
-        '-webkit-tap-highlight-color:transparent!important;' +
-        'transition:transform .15s,box-shadow .15s!important;' +
-      '}' +
-      '.ss-host-btn:active{transform:scale(0.96)!important;}' +
-      '.ss-host-btn:disabled{opacity:.6!important;cursor:wait!important;}' +
-      '.ss-host-live{' +
-        'background:linear-gradient(135deg,#8b1a1a,#5c0d0d)!important;' +
-        'animation:ssPulse 2s infinite!important;' +
-      '}' +
-      '@keyframes ssPulse{' +
-        '0%{box-shadow:0 0 0 0 rgba(220,53,69,.4);}' +
-        '70%{box-shadow:0 0 0 12px rgba(220,53,69,0);}' +
-        '100%{box-shadow:0 0 0 0 rgba(220,53,69,0);}' +
-      '}';
-    document.head.appendChild(s);
-  }
-
-  function injectViewerStyles() {
-    if (document.getElementById('ssViewerStyle')) return;
-    var s = document.createElement('style');
-    s.id = 'ssViewerStyle';
-    s.textContent =
-      '.ss-overlay{' +
-        'position:fixed!important;inset:0!important;z-index:99999!important;' +
-        'display:flex!important;flex-direction:column!important;' +
-        'font-family:Tajawal,sans-serif!important;background:#000!important;' +
-      '}' +
-      '.ss-bar{' +
-        'height:48px!important;flex-shrink:0!important;' +
-        'background:linear-gradient(90deg,#1a1a2e,#16213e)!important;' +
-        'display:flex!important;align-items:center!important;' +
-        'justify-content:space-between!important;padding:0 12px!important;' +
-        'border-bottom:1px solid rgba(200,168,75,0.2)!important;' +
-      '}' +
-      '.ss-bar-title{' +
-        'color:#c8a84b!important;font-size:15px!important;font-weight:700!important;' +
-      '}' +
-      '.ss-bar-status{' +
-        'color:rgba(255,255,255,0.7)!important;font-size:12px!important;' +
-      '}' +
-      '.ss-close{' +
-        'width:32px!important;height:32px!important;border-radius:50%!important;' +
-        'background:rgba(255,255,255,0.1)!important;border:none!important;' +
-        'color:#fff!important;font-size:16px!important;cursor:pointer!important;' +
-        'display:flex!important;align-items:center!important;justify-content:center!important;' +
-      '}' +
-      '.ss-stage{' +
-        'flex:1!important;position:relative!important;' +
-        'display:flex!important;align-items:center!important;justify-content:center!important;' +
-        'background:#000!important;overflow:hidden!important;' +
-      '}' +
-      '.ss-stage video{' +
-        'width:100%!important;height:100%!important;object-fit:contain!important;' +
-      '}' +
-      '.ss-wait{' +
-        'position:absolute!important;inset:0!important;' +
-        'display:flex!important;flex-direction:column!important;' +
-        'align-items:center!important;justify-content:center!important;' +
-        'gap:12px!important;color:#fff!important;' +
-      '}' +
-      '.ss-wait-icon{font-size:48px!important;}' +
-      '.ss-wait-text{font-size:16px!important;color:rgba(255,255,255,0.8)!important;}';
-    document.head.appendChild(s);
-  }
-
-})();
 </script>
     <script>
-/* ===== SCREEN SYNC — نظام نقل الشاشة ===== */
-console.log('[SS] Script loaded');
-
+/* ===== DOM SYNC — مزامنة التلوين ===== */
 (function(){
-  'use strict';
-
-  var btn = document.createElement('button');
-  btn.id = 'ssBtn';
-  btn.innerHTML = '📡 ابدأ البث';
-  btn.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:99999;padding:14px 22px;background:linear-gradient(135deg,#1a6060,#0d4545);color:#c8a84b;border:2px solid rgba(200,168,75,0.4);border-radius:50px;font-family:Tajawal,sans-serif;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.4);-webkit-tap-highlight-color:transparent;';
-  document.body.appendChild(btn);
-  console.log('[SS] Button created');
-
-  var pc = null, stream = null, syncRef = null;
-
-  btn.onclick = function(){
-    console.log('[SS] Clicked. awDb=' + !!window.awDb + ' room=' + window.awRoomCode + ' host=' + window.awIsHost);
-    if(!window.awDb){ alert('Firebase غير جاهز'); return; }
-    if(!window.awRoomCode){ alert('كود الغرفة غير موجود'); return; }
-    if(window.awIsHost!==true && window.awIsHost!==false){ alert('حالة المقدم غير محددة'); return; }
-
-    if(window.awIsHost){
-      startHost();
-    }else{
-      startViewer();
-      btn.style.display = 'none';
-    }
-  };
-
-  /* ─── HOST ─── */
-  async function startHost(){
-    btn.disabled = true;
-    btn.innerHTML = '⏳ جاري...';
-    try{
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video:{width:1280,height:720,frameRate:15}, audio:false
-      });
-    }catch(e){
-      console.error('[SS] Capture failed', e);
-      btn.disabled = false; btn.innerHTML = '📡 ابدأ البث';
-      alert('فشل التقاط الشاشة: ' + e.message);
+  function waitForVars(){
+    if(!window.awDb || !window.awRoomCode || window.awIsHost == null){
+      setTimeout(waitForVars, 400);
       return;
     }
-
-    pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-    stream.getTracks().forEach(function(t){ pc.addTrack(t, stream); });
-
-    syncRef = window.awDb.ref('rooms/'+window.awRoomCode+'/screenSync');
-    await syncRef.remove();
-
-    pc.onicecandidate = function(e){
-      if(e.candidate) syncRef.child('hostIce').push(e.candidate.toJSON());
-    };
-
-    var offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await syncRef.child('offer').set(offer.toJSON());
-    console.log('[SS] Offer sent');
-
-    syncRef.child('answer').on('value', async function(snap){
-      var ans = snap.val();
-      if(ans && pc.signalingState==='have-local-offer'){
-        await pc.setRemoteDescription(new RTCSessionDescription(ans));
-        console.log('[SS] Viewer connected!');
-        btn.innerHTML = '🔴 إيقاف البث'; btn.disabled = false;
-        btn.onclick = stopHost;
-      }
-    });
-
-    stream.getVideoTracks()[0].onended = stopHost;
+    startSync();
   }
 
-  function stopHost(){
-    if(stream) stream.getTracks().forEach(function(t){t.stop()});
-    if(pc) pc.close();
-    if(syncRef) syncRef.remove().catch(function(){});
-    pc=null; stream=null; syncRef=null;
-    btn.innerHTML = '📡 ابدأ البث'; btn.onclick = function(){startHost();};
-  }
-
-  /* ─── VIEWER ─── */
-  function startViewer(){
-    console.log('[SS] Viewer init');
-    var overlay = document.createElement('div');
-    overlay.id = 'ssOverlay';
-    overlay.innerHTML =
-      '<div style="height:48px;background:linear-gradient(90deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid rgba(200,168,75,0.2);font-family:Tajawal,sans-serif;">'+
-        '<span style="color:#c8a84b;font-size:15px;font-weight:700;">📺 شاشة المقدم</span>'+
-        '<span id="ssStatus" style="color:rgba(255,255,255,0.7);font-size:12px;">⏳ في الانتظار...</span>'+
-        '<button onclick="document.getElementById(\'ssOverlay\').remove();if(window._ssPC){window._ssPC.close();}" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;">✕</button>'+
-      '</div>'+
-      '<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#000;">'+
-        '<video id="ssVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;"></video>'+
-      '</div>';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;background:#000;';
-    document.body.appendChild(overlay);
-
-    var video = document.getElementById('ssVideo');
-    var statusEl = document.getElementById('ssStatus');
-
-    pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-    window._ssPC = pc;
-
-    pc.ontrack = function(e){
-      console.log('[SS] Stream received');
-      if(video.srcObject !== e.streams[0]){
-        video.srcObject = e.streams[0];
-        video.play().catch(function(){});
-        statusEl.textContent = '🔴 بث مباشر';
-      }
-    };
-
-    syncRef = window.awDb.ref('rooms/'+window.awRoomCode+'/screenSync');
-    pc.onicecandidate = function(e){ if(e.candidate) syncRef.child('viewerIce').push(e.candidate.toJSON()); };
-
-    syncRef.child('offer').on('value', async function(snap){
-      var offer = snap.val();
-      if(!offer || pc.signalingState !== 'stable') return;
-      console.log('[SS] Offer received');
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      var answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await syncRef.child('answer').set(answer.toJSON());
-      console.log('[SS] Answer sent');
-    });
-
-    syncRef.child('hostIce').on('child_added', async function(snap){
-      try{ await pc.addIceCandidate(new RTCIceCandidate(snap.val())); }catch(e){}
-    });
-  }
-
-  /* ─── Fallback: DOM Sync للتلوين ─── */
-  (function domSync(){
-    if(!window.awDb || !window.awRoomCode) return;
+  function startSync(){
     var db = window.awDb, room = window.awRoomCode, isHost = window.awIsHost;
+    console.log('[DOMSync] Ready. Host=' + isHost);
+
     if(isHost){
-      var svg = document.querySelector('svg');
-      if(!svg) return;
-      var obs = new MutationObserver(function(muts){
-        muts.forEach(function(m){
-          if(m.type!=='attributes' || m.attributeName!=='class') return;
-          var el = m.target, country = el.getAttribute('data-eng');
-          if(!country) return;
-          var cls = el.className.baseVal || el.className, color = null;
-          if(cls.includes('occupied-blue')) color='blue';
-          else if(cls.includes('occupied-red')) color='red';
-          else if(cls.includes('occupied-green')) color='green';
-          else if(cls.includes('occupied-yellow')) color='yellow';
-          if(color){
-            db.ref('rooms/'+room+'/domSync/'+country).set({color:color, t:Date.now()});
+      var lastColors = {};
+      setInterval(function(){
+        document.querySelectorAll('path[data-eng]').forEach(function(p){
+          var c = p.getAttribute('data-eng');
+          if(!c) return;
+          var cls = p.className.baseVal || p.className || '';
+          var color = '';
+          if(cls.indexOf('occupied-blue') > -1) color = 'blue';
+          else if(cls.indexOf('occupied-red') > -1) color = 'red';
+          else if(cls.indexOf('occupied-green') > -1) color = 'green';
+          else if(cls.indexOf('occupied-yellow') > -1) color = 'yellow';
+
+          if(color && lastColors[c] !== color){
+            lastColors[c] = color;
+            db.ref('rooms/'+room+'/colors/'+c).set(color);
+            console.log('[DOMSync] Sent:', c, color);
           }
         });
+      }, 300);
+    } else {
+      db.ref('rooms/'+room+'/colors').on('value', function(snap){
+        var colors = snap.val() || {};
+        for(var c in colors){
+          var color = colors[c];
+          document.querySelectorAll('path[data-eng="'+c+'"]').forEach(function(p){
+            p.classList.remove('occupied-blue','occupied-red','occupied-green','occupied-yellow');
+            if(color) p.classList.add('occupied-'+color);
+          });
+        }
+        console.log('[DOMSync] Applied', Object.keys(colors).length, 'colors');
       });
-      obs.observe(svg, {attributes:true, subtree:true, attributeFilter:['class']});
-      console.log('[DOMSync] Watching colors');
-    }else{
-      db.ref('rooms/'+room+'/domSync').on('child_added', function(snap){
-        var c = snap.key, d = snap.val(); if(!d||!d.color) return;
-        document.querySelectorAll('path[data-eng="'+c+'"]').forEach(function(p){
-          p.classList.remove('occupied-blue','occupied-red','occupied-green','occupied-yellow');
-          p.classList.add('occupied-'+d.color);
-        });
-      });
-      db.ref('rooms/'+room+'/domSync').on('child_changed', function(snap){
-        var c = snap.key, d = snap.val(); if(!d||!d.color) return;
-        document.querySelectorAll('path[data-eng="'+c+'"]').forEach(function(p){
-          p.classList.remove('occupied-blue','occupied-red','occupied-green','occupied-yellow');
-          p.classList.add('occupied-'+d.color);
-        });
-      });
-      console.log('[DOMSync] Listening for colors');
     }
-  })();
+  }
 
+  waitForVars();
 })();
 </script>
 </body>
