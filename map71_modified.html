@@ -11023,23 +11023,33 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       };
 
       if (isInGame) {
+        // حالة القارة والزوم
+        state.continent = typeof currentContinent !== 'undefined' ? currentContinent : null;
+        state.zoomed = typeof zoomed !== 'undefined' ? zoomed : false;
+        state.turn = typeof currentTurn !== 'undefined' ? currentTurn : 'blue';
+
         // النتائج
-        state.scores = {
-          b: teams?.blue?.score || 0,
-          r: teams?.red?.score || 0,
-          bc: teams?.blue?.countries || 0,
-          rc: teams?.red?.countries || 0
-        };
+        if (typeof teams !== 'undefined') {
+          state.scores = {
+            b: teams.blue?.score || 0, r: teams.red?.score || 0,
+            bc: teams.blue?.countries || 0, rc: teams.red?.countries || 0
+          };
+        }
+
         // الشاشة النشطة
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
         const cEl = document.getElementById('categoryModal');
+        const wEl = document.getElementById('fortuneWheelModal') || document.querySelector('.fortune-wheel-modal');
         state.panel = qEl?.classList.contains('active') ? 'q'
           : nEl?.classList.contains('active') ? 'n'
-          : cEl?.classList.contains('active') ? 'c' : 'm';
-        if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0,12000);
-        if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0,12000);
-        if (state.panel === 'c') state.ph = cEl.innerHTML.slice(0,12000);
+          : cEl?.classList.contains('active') ? 'c'
+          : wEl?.classList.contains('active') ? 'w' : 'm';
+        if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0, 12000);
+        if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0, 12000);
+        if (state.panel === 'c') state.ph = cEl.innerHTML.slice(0, 12000);
+        if (state.panel === 'w') state.ph = wEl?.innerHTML?.slice(0, 8000) || '';
+
         // ألوان الدول
         const col = {};
         document.querySelectorAll('[class*="occupied-"]').forEach(el => {
@@ -11075,22 +11085,39 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   }
 
   // ════ تطبيق الحالة عند المشاهد ════
+  let _awLastContinent = null;
+  let _awGameStarted = false;
+
   function awApplyState(state) {
     if (!awIsViewer || !state) return;
     try {
       if (state.screen === 'game') {
         const gameEl = document.getElementById('game');
-        // إذا اللعبة لم تبدأ بعد عند المشاهد، ابدأها
-        if (!gameEl?.classList.contains('active')) {
-          // ضبط أسماء الفرق قبل البدء
+
+        // ابدأ اللعبة إذا لم تبدأ بعد
+        if (!_awGameStarted || !gameEl?.classList.contains('active')) {
           if (state.teams) {
             const nb = document.getElementById('nameBlue');
             const nr = document.getElementById('nameRed');
             if (nb) nb.value = state.teams.blue;
             if (nr) nr.value = state.teams.red;
           }
-          if (typeof startGame === 'function') startGame();
-          return; // انتظر الاستدعاء التالي بعد تحميل الخريطة
+          if (typeof startGame === 'function') {
+            startGame();
+            _awGameStarted = true;
+          }
+          return; // انتظر تحميل الخريطة ثم تطبيق باقي الحالة
+        }
+
+        // مزامنة القارة — استدعاء selectContinent مباشرة
+        if (state.zoomed && state.continent && state.continent !== _awLastContinent) {
+          _awLastContinent = state.continent;
+          if (typeof selectContinent === 'function') {
+            setTimeout(() => selectContinent(state.continent), 100);
+          }
+        } else if (!state.zoomed && _awLastContinent) {
+          _awLastContinent = null;
+          if (typeof showContinents === 'function') showContinents();
         }
 
         // تطبيق ألوان الدول
@@ -11108,7 +11135,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
         const cEl = document.getElementById('categoryModal');
-        [qEl, nEl, cEl].forEach(el => el?.classList.remove('active'));
+        const wEl = document.getElementById('fortuneWheelModal') || document.querySelector('.fortune-wheel-modal');
+        [qEl, nEl, cEl, wEl].forEach(el => el?.classList.remove('active'));
 
         if (state.panel === 'q' && state.ph && qEl) {
           qEl.innerHTML = state.ph; qEl.classList.add('active');
@@ -11116,6 +11144,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           nEl.innerHTML = state.ph; nEl.classList.add('active');
         } else if (state.panel === 'c' && state.ph && cEl) {
           cEl.innerHTML = state.ph; cEl.classList.add('active');
+        } else if (state.panel === 'w' && state.ph && wEl) {
+          wEl.innerHTML = state.ph; wEl.classList.add('active');
         }
       }
 
