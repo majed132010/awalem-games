@@ -32,18 +32,11 @@
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        html, body {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
         body {
             font-family: 'Tajawal', sans-serif;
             background: var(--parchment);
             color: var(--ink);
             min-height: 100vh;
-            min-height: 100dvh;
             overflow: hidden;
         }
 
@@ -504,7 +497,6 @@
         .game-screen.active {
             display: flex;
             flex-direction: column;
-            width: 100%;
             height: 100vh;
             height: 100dvh;
             overflow: hidden;
@@ -10678,5 +10670,409 @@
             }
         }, 500);
     </script>
+
+<!-- ════════════════════════════════════════════════════════
+     🎮 نظام الغرف المتعددة — صراع القارات (Awalem Live)
+     المقدم يتحكم، المشاهدون يتابعون لحظة بلحظة عبر Firebase
+     ════════════════════════════════════════════════════════ -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<style>
+/* ════ شاشة الغرفة (تظهر فوق كل شيء قبل بدء اللعبة) ════ */
+#awGameRoom {
+  position: fixed; inset: 0; z-index: 99999;
+  background: linear-gradient(135deg, #0b1a1f 0%, #122530 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; font-family: 'Tajawal', sans-serif; padding: 24px;
+}
+#awGameRoom.hidden { display: none; }
+.aw-logo { font-size: 48px; margin-bottom: 4px; }
+.aw-title { font-size: 24px; font-weight: 900; color: #c8a84b; text-align: center; }
+.aw-sub { font-size: 14px; color: rgba(255,255,255,0.5); text-align: center; margin-top: -10px; }
+.aw-tabs {
+  display: flex; gap: 8px; background: rgba(0,0,0,0.3);
+  border-radius: 12px; padding: 4px;
+}
+.aw-tab {
+  padding: 10px 24px; border-radius: 10px; cursor: pointer;
+  font-family: 'Tajawal', sans-serif; font-size: 15px; font-weight: 700;
+  border: none; color: rgba(255,255,255,0.5); background: transparent;
+  transition: all 0.2s;
+}
+.aw-tab.active {
+  background: rgba(200,168,75,0.2); color: #c8a84b;
+  border: 1px solid rgba(200,168,75,0.3);
+}
+.aw-panel { display: none; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 340px; }
+.aw-panel.active { display: flex; }
+.aw-code-display {
+  font-size: 52px; font-weight: 900; letter-spacing: 12px;
+  color: #c8a84b; text-shadow: 0 0 30px rgba(200,168,75,0.4);
+  background: rgba(0,0,0,0.3); border-radius: 16px;
+  padding: 16px 28px; border: 1px solid rgba(200,168,75,0.2);
+  text-align: center; cursor: pointer; user-select: all;
+}
+.aw-code-hint { font-size: 12px; color: rgba(255,255,255,0.4); text-align: center; }
+.aw-viewers {
+  background: rgba(0,0,0,0.2); border-radius: 12px; padding: 12px 16px;
+  width: 100%; text-align: center; min-height: 44px;
+  font-size: 13px; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.06);
+}
+.aw-inp {
+  width: 100%; padding: 14px; border-radius: 12px; font-size: 28px;
+  font-weight: 900; text-align: center; letter-spacing: 8px;
+  background: rgba(0,0,0,0.3); border: 1px solid rgba(200,168,75,0.3);
+  color: #fff; font-family: 'Tajawal', sans-serif; outline: none;
+  box-sizing: border-box;
+}
+.aw-inp::placeholder { font-size: 16px; letter-spacing: 2px; color: rgba(255,255,255,0.3); }
+.aw-btn {
+  width: 100%; padding: 14px; border-radius: 12px; border: none;
+  background: linear-gradient(135deg, #c8a84b, #a07830);
+  color: #fff; font-family: 'Tajawal', sans-serif;
+  font-size: 17px; font-weight: 800; cursor: pointer;
+  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+}
+.aw-btn:active { transform: scale(0.97); }
+.aw-btn.secondary {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.8);
+}
+.aw-status { font-size: 13px; color: rgba(255,255,255,0.5); text-align: center; min-height: 20px; }
+.aw-status.error { color: #e06060; }
+.aw-status.success { color: #23a55a; }
+/* شريط المشاهد (يظهر أثناء اللعبة فوق الخريطة) */
+#awViewerBar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center;
+  gap: 12px; padding: 8px 16px; font-family: 'Tajawal', sans-serif;
+  border-bottom: 1px solid rgba(200,168,75,0.2);
+}
+#awViewerBar.show { display: flex; }
+.aw-viewer-badge {
+  background: rgba(200,168,75,0.15); border: 1px solid rgba(200,168,75,0.3);
+  color: #c8a84b; padding: 4px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
+}
+.aw-live-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #ed4245;
+  animation: awPulse 1.5s infinite;
+}
+@keyframes awPulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+/* تعطيل التفاعل للمشاهد */
+body.aw-viewer-mode * { pointer-events: none !important; }
+body.aw-viewer-mode #awViewerBar,
+body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
+</style>
+
+<div id="awGameRoom">
+  <div class="aw-logo">🗺️</div>
+  <div class="aw-title">صراع القارات — بث مباشر</div>
+  <div class="aw-sub">العب مع أصدقائك أينما كانوا</div>
+
+  <div class="aw-tabs">
+    <button class="aw-tab active" onclick="awSwitchTab('host')">🎮 مقدم</button>
+    <button class="aw-tab" onclick="awSwitchTab('viewer')">👁️ مشاهد</button>
+  </div>
+
+  <!-- لوحة المقدم -->
+  <div class="aw-panel active" id="awHostPanel">
+    <div style="text-align:center;color:rgba(255,255,255,0.6);font-size:13px">
+      أنشئ غرفة واحصل على كود للمشاهدين
+    </div>
+    <div class="aw-code-display" id="awCodeDisplay" onclick="awCopyCode()" title="انقر للنسخ">——————</div>
+    <div class="aw-code-hint">انقر على الكود لنسخه 📋</div>
+    <div class="aw-viewers" id="awViewersCount">⏳ جاري إنشاء الغرفة...</div>
+    <button class="aw-btn" onclick="awStartAsHost()">▶ ابدأ اللعبة</button>
+    <button class="aw-btn secondary" onclick="awSkipRoom()">تخطّ — العب بدون بث</button>
+  </div>
+
+  <!-- لوحة المشاهد -->
+  <div class="aw-panel" id="awViewerPanel">
+    <div style="text-align:center;color:rgba(255,255,255,0.6);font-size:13px">
+      أدخل الكود الذي أرسله لك المقدم
+    </div>
+    <input class="aw-inp" id="awCodeInp" type="text" inputmode="numeric"
+      maxlength="6" placeholder="الكود (6 أرقام)"
+      oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,6)">
+    <div class="aw-status" id="awViewerStatus"></div>
+    <button class="aw-btn" onclick="awJoinAsViewer()">👁️ انضم كمشاهد</button>
+    <button class="aw-btn secondary" onclick="awSkipRoom()">تخطّ — العب بمفردك</button>
+  </div>
+</div>
+
+<!-- شريط المشاهد أثناء اللعبة -->
+<div id="awViewerBar">
+  <div class="aw-live-dot"></div>
+  <div class="aw-viewer-badge">مشاهد مباشر</div>
+  <div id="awHostCode" style="font-size:12px;color:rgba(255,255,255,0.4)"></div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ════ إعداد Firebase (نفس مشروع عوالم) ════
+  const AW_FB_CONFIG = {
+    apiKey: "AIzaSyCmZPRoEt3IDFxeH-aqvYQIi5dGOmFlS5Y",
+    authDomain: "awalim2-5bdb1.firebaseapp.com",
+    databaseURL: "https://awalim2-5bdb1-default-rtdb.firebaseio.com",
+    projectId: "awalim2-5bdb1",
+    storageBucket: "awalim2-5bdb1.appspot.com",
+    messagingSenderId: "939518942115",
+    appId: "1:939518942115:web:404307d7b8e0677c335816"
+  };
+
+  let awApp, awDb, awRoomRef;
+  let awIsHost = false;
+  let awIsViewer = false;
+  let awRoomCode = null;
+  let awSyncInterval = null;
+  let awLastSyncHash = '';
+
+  // تهيئة Firebase منفصلة (app مختلف عن عوالم الرئيسي)
+  try {
+    awApp = firebase.initializeApp(AW_FB_CONFIG, 'awalem-game');
+    awDb = firebase.database(awApp);
+  } catch(e) {
+    // إذا كان Firebase موجوداً بالفعل، استخدم الـapp الموجود
+    try {
+      awApp = firebase.app('awalem-game');
+      awDb = firebase.database(awApp);
+    } catch(e2) {
+      console.warn('[AW] Firebase init failed:', e2);
+    }
+  }
+
+  // ════ توليد كود عشوائي 6 أرقام ════
+  function awGenCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  // ════ التبديل بين تبويبي المقدم والمشاهد ════
+  window.awSwitchTab = function(tab) {
+    document.querySelectorAll('.aw-tab').forEach((t, i) => {
+      t.classList.toggle('active', (i === 0 && tab === 'host') || (i === 1 && tab === 'viewer'));
+    });
+    document.getElementById('awHostPanel').classList.toggle('active', tab === 'host');
+    document.getElementById('awViewerPanel').classList.toggle('active', tab === 'viewer');
+  };
+
+  // ════ نسخ الكود ════
+  window.awCopyCode = function() {
+    if (!awRoomCode) return;
+    navigator.clipboard?.writeText(awRoomCode).catch(() => {});
+    const el = document.getElementById('awCodeDisplay');
+    const orig = el.textContent;
+    el.textContent = '✓ تم النسخ';
+    setTimeout(() => { el.textContent = orig; }, 1500);
+  };
+
+  // ════ تخطي النظام والعب بدون بث ════
+  window.awSkipRoom = function() {
+    document.getElementById('awGameRoom').classList.add('hidden');
+  };
+
+  // ════ إنشاء الغرفة كمقدم ════
+  async function awCreateRoom() {
+    if (!awDb) { document.getElementById('awViewersCount').textContent = '⚠️ Firebase غير متاح'; return; }
+    awRoomCode = awGenCode();
+    document.getElementById('awCodeDisplay').textContent = awRoomCode;
+    awRoomRef = awDb.ref('game_rooms/' + awRoomCode);
+    await awRoomRef.set({ host: true, viewers: 0, state: null, ts: Date.now() });
+    // حذف الغرفة تلقائياً بعد 3 ساعات
+    awRoomRef.child('ts').onDisconnect().remove();
+    // مراقبة عدد المشاهدين
+    awRoomRef.child('viewers').on('value', snap => {
+      const count = snap.val() || 0;
+      document.getElementById('awViewersCount').textContent =
+        count > 0 ? `👁️ ${count} مشاهد منضم` : '⏳ لا يوجد مشاهدون بعد...';
+    });
+  }
+
+  // ════ بدء اللعبة كمقدم ════
+  window.awStartAsHost = function() {
+    if (!awRoomCode) { awSkipRoom(); return; }
+    awIsHost = true;
+    document.getElementById('awGameRoom').classList.add('hidden');
+    // بدء إرسال الحالة كل 300ms
+    awSyncInterval = setInterval(awSendState, 300);
+    // إرسال فوري عند أي تغيير DOM
+    awWatchDomChanges();
+  };
+
+  // ════ الانضمام كمشاهد ════
+  window.awJoinAsViewer = async function() {
+    const code = document.getElementById('awCodeInp').value.trim();
+    const statusEl = document.getElementById('awViewerStatus');
+    if (code.length !== 6) {
+      statusEl.textContent = '⚠️ الكود يجب أن يكون 6 أرقام';
+      statusEl.className = 'aw-status error'; return;
+    }
+    if (!awDb) {
+      statusEl.textContent = '⚠️ Firebase غير متاح';
+      statusEl.className = 'aw-status error'; return;
+    }
+    statusEl.textContent = '⏳ جاري البحث عن الغرفة...';
+    statusEl.className = 'aw-status';
+    const snap = await awDb.ref('game_rooms/' + code).once('value');
+    if (!snap.exists()) {
+      statusEl.textContent = '❌ الكود غير صحيح أو انتهت صلاحية الغرفة';
+      statusEl.className = 'aw-status error'; return;
+    }
+    statusEl.textContent = '✅ تم الانضمام!';
+    statusEl.className = 'aw-status success';
+    awRoomCode = code;
+    awRoomRef = awDb.ref('game_rooms/' + code);
+    awIsViewer = true;
+    // تسجيل المشاهد
+    awRoomRef.child('viewers').transaction(v => (v || 0) + 1);
+    awRoomRef.child('viewers').onDisconnect().transaction(v => Math.max(0, (v || 1) - 1));
+    setTimeout(() => {
+      document.getElementById('awGameRoom').classList.add('hidden');
+      document.getElementById('awViewerBar').classList.add('show');
+      document.getElementById('awHostCode').textContent = 'كود: ' + code;
+      document.body.classList.add('aw-viewer-mode');
+      // الاستماع للحالة
+      awRoomRef.child('state').on('value', snap => {
+        const state = snap.val();
+        if (state) awApplyState(state);
+      });
+    }, 800);
+  };
+
+  // ════ جمع حالة اللعبة الكاملة (للمقدم) ════
+  function awCollectState() {
+    try {
+      // حالة الشاشات النشطة
+      const screens = {};
+      document.querySelectorAll('.game-screen').forEach(s => {
+        screens[s.id] = s.classList.contains('active');
+      });
+
+      // ألوان الدول (occupied classes)
+      const countries = {};
+      document.querySelectorAll('.country-path, [class*="occupied-"]').forEach(el => {
+        const name = el.getAttribute('data-name') || el.id;
+        if (name) {
+          const cls = el.className?.baseVal || el.className || '';
+          if (cls.includes('occupied-blue')) countries[name] = 'blue';
+          else if (cls.includes('occupied-red')) countries[name] = 'red';
+        }
+      });
+
+      // النصوص المهمة على الشاشة
+      const texts = {};
+      ['score-blue', 'score-red', 'blueScore', 'redScore',
+       'turnIndicator', 'questionText', 'timerDisplay',
+       'questionScreen', 'continentName', 'winText'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) texts[id] = el.textContent?.slice(0, 200) || '';
+      });
+
+      // HTML الكامل لعناصر مهمة
+      const htmlSnaps = {};
+      ['mapContainer', 'worldMap', 'questionScreen',
+       'numbersScreen', 'categoryModal', 'scorePanel',
+       'turnIndicator', 'continentScreen', 'gameOverScreen',
+       'conquerScreen', 'flashScreen', 'winOverlay'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.classList.contains('active')) {
+          htmlSnaps[id] = el.innerHTML?.slice(0, 50000) || '';
+        }
+      });
+
+      // SVG الخريطة (مصغّر)
+      const mapEl = document.querySelector('#worldMap svg, #mapContainer svg');
+      const mapSvgHtml = mapEl ? mapEl.outerHTML.slice(0, 200000) : '';
+
+      return { screens, countries, texts, htmlSnaps, mapSvgHtml, ts: Date.now() };
+    } catch(e) { return null; }
+  }
+
+  // ════ إرسال الحالة لـFirebase ════
+  function awSendState() {
+    if (!awIsHost || !awRoomRef) return;
+    const state = awCollectState();
+    if (!state) return;
+    // فقط أرسل إذا تغيّر شيء (تجنّب requests زائدة)
+    const hash = JSON.stringify(state.screens) + JSON.stringify(state.countries) + JSON.stringify(state.texts);
+    if (hash === awLastSyncHash) return;
+    awLastSyncHash = hash;
+    awRoomRef.child('state').set(state).catch(() => {});
+  }
+
+  // ════ مراقبة تغييرات DOM (إضافية للمقدم) ════
+  function awWatchDomChanges() {
+    const observer = new MutationObserver(() => {
+      clearTimeout(window._awMutTimer);
+      window._awMutTimer = setTimeout(awSendState, 100);
+    });
+    observer.observe(document.body, {
+      childList: true, subtree: true,
+      attributes: true, attributeFilter: ['class', 'style']
+    });
+  }
+
+  // ════ تطبيق الحالة عند المشاهد ════
+  function awApplyState(state) {
+    if (!awIsViewer || !state) return;
+    try {
+      // تطبيق SVG الخريطة كاملاً إذا تغيّر
+      if (state.mapSvgHtml) {
+        const mapContainer = document.querySelector('#worldMap, #mapContainer');
+        if (mapContainer) {
+          const currentSvg = mapContainer.querySelector('svg');
+          if (currentSvg) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = state.mapSvgHtml;
+            const newSvg = tmp.querySelector('svg');
+            if (newSvg && newSvg.outerHTML !== currentSvg.outerHTML) {
+              currentSvg.replaceWith(newSvg);
+            }
+          }
+        }
+      }
+
+      // تطبيق HTML للشاشات النشطة
+      if (state.htmlSnaps) {
+        Object.entries(state.htmlSnaps).forEach(([id, html]) => {
+          const el = document.getElementById(id);
+          if (el && html) {
+            el.innerHTML = html;
+            el.classList.add('active');
+          }
+        });
+      }
+
+      // تطبيق حالة الشاشات (active/inactive)
+      if (state.screens) {
+        Object.entries(state.screens).forEach(([id, isActive]) => {
+          const el = document.getElementById(id);
+          if (el) el.classList.toggle('active', isActive);
+        });
+      }
+
+      // تطبيق النصوص
+      if (state.texts) {
+        Object.entries(state.texts).forEach(([id, text]) => {
+          const el = document.getElementById(id);
+          if (el && el.textContent !== text) el.textContent = text;
+        });
+      }
+    } catch(e) { console.warn('[AW viewer] apply error:', e); }
+  }
+
+  // ════ بدء إنشاء الغرفة تلقائياً (لوحة المقدم) ════
+  awCreateRoom().catch(() => {
+    document.getElementById('awViewersCount').textContent = '⚠️ تعذر الاتصال بالخادم';
+  });
+
+})();
+</script>
 </body>
 </html>
