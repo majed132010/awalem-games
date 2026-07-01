@@ -11028,7 +11028,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           };
         }
 
-        // الشاشة النشطة — فقط السؤال والمربعات للمشاهد
+        // الشاشة النشطة — السؤال والمربعات
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
         state.panel = qEl?.classList.contains('active') ? 'q'
@@ -11036,7 +11036,19 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0, 12000);
         if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0, 12000);
 
-        // ملاحظة: العجلة (categoryModal) واختيار الدولة (countryInfo) لا تُرسل للمشاهد
+        // نافذة اختيار الفئة (العجلة / الوميض / اليدوي) — تُرسل كاملة ليراها المشاهد لحظياً
+        const catEl = document.getElementById('categoryModal');
+        state.catActive = !!catEl?.classList.contains('active');
+        if (state.catActive) state.catHtml = catEl.innerHTML.slice(0, 20000);
+
+        // قائمة الدول المحتلة (اللون + الفريق) — كي يلوّن المشاهد نفس الدول على خريطته
+        try {
+          const occNodes = document.querySelectorAll('.country.occupied-blue, .country.occupied-red');
+          state.occ = Array.from(occNodes).map(el => ({
+            n: el.getAttribute('data-eng'),
+            t: el.classList.contains('occupied-blue') ? 'b' : 'r'
+          }));
+        } catch(e2) { state.occ = []; }
       }
       return state;
     } catch(e) { return null; }
@@ -11129,7 +11141,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           if (typeof showContinents === 'function') showContinents();
         }
 
-        // تطبيق الشاشة النشطة — السؤال والمربعات فقط
+        // تطبيق الشاشة النشطة — السؤال والمربعات
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
         [qEl, nEl].forEach(el => el?.classList.remove('active'));
@@ -11139,6 +11151,30 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         } else if (state.panel === 'n' && state.ph && nEl) {
           nEl.innerHTML = state.ph; nEl.classList.add('active');
         }
+
+        // تطبيق نافذة الفئة/العجلة كما هي عند المقدم
+        const catEl = document.getElementById('categoryModal');
+        if (catEl) {
+          if (state.catActive && state.catHtml) {
+            catEl.innerHTML = state.catHtml;
+            catEl.classList.add('active');
+          } else {
+            catEl.classList.remove('active');
+          }
+        }
+
+        // تلوين الدول المحتلة على خريطة المشاهد لتطابق خريطة المقدم
+        try {
+          const svg = document.querySelector('#worldMap svg');
+          if (svg && Array.isArray(state.occ)) {
+            svg.querySelectorAll('.country.occupied-blue, .country.occupied-red')
+              .forEach(el => el.classList.remove('occupied-blue', 'occupied-red'));
+            state.occ.forEach(item => {
+              const path = svg.querySelector(`.country[data-eng="${CSS.escape(item.n)}"]`);
+              if (path) path.classList.add(item.t === 'b' ? 'occupied-blue' : 'occupied-red');
+            });
+          }
+        } catch(e3) { /* تجاهل أي خطأ في التلوين حتى لا يوقف باقي المزامنة */ }
       }
 
       if (state.screen === 'gameOver') {
