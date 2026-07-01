@@ -10834,19 +10834,32 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let awSyncInterval = null;
   let awLastSyncHash = '';
 
-  // تهيئة Firebase منفصلة (app مختلف عن عوالم الرئيسي)
-  try {
-    awApp = firebase.initializeApp(AW_FB_CONFIG, 'awalem-game');
-    awDb = firebase.database(awApp);
-  } catch(e) {
-    // إذا كان Firebase موجوداً بالفعل، استخدم الـapp الموجود
+  // تهيئة Firebase — نستخدم نفس الـapp إذا كان موجوداً
+  function awInitFirebase() {
     try {
-      awApp = firebase.app('awalem-game');
-      awDb = firebase.database(awApp);
-    } catch(e2) {
-      console.warn('[AW] Firebase init failed:', e2);
+      // حاول الحصول على app موجود أولاً
+      try { awApp = firebase.app('aw-game'); } catch(e) {}
+      if (!awApp) {
+        awApp = firebase.initializeApp(AW_FB_CONFIG, 'aw-game');
+      }
+      awDb = awApp.database();
+      console.log('[AW] Firebase ready ✅');
+      return true;
+    } catch(e) {
+      console.error('[AW] Firebase init error:', e);
+      // محاولة أخيرة باستخدام الـapp الافتراضي
+      try {
+        awDb = firebase.database();
+        console.log('[AW] Using default Firebase app');
+        return true;
+      } catch(e2) {
+        console.error('[AW] All Firebase attempts failed:', e2);
+        return false;
+      }
     }
   }
+
+  const awFirebaseReady = awInitFirebase();
 
   // ════ توليد كود عشوائي 6 أرقام ════
   function awGenCode() {
@@ -10879,19 +10892,28 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
   // ════ إنشاء الغرفة كمقدم ════
   async function awCreateRoom() {
-    if (!awDb) { document.getElementById('awViewersCount').textContent = '⚠️ Firebase غير متاح'; return; }
-    awRoomCode = awGenCode();
-    document.getElementById('awCodeDisplay').textContent = awRoomCode;
-    awRoomRef = awDb.ref('game_rooms/' + awRoomCode);
-    await awRoomRef.set({ host: true, viewers: 0, state: null, ts: Date.now() });
-    // حذف الغرفة تلقائياً بعد 3 ساعات
-    awRoomRef.child('ts').onDisconnect().remove();
-    // مراقبة عدد المشاهدين
-    awRoomRef.child('viewers').on('value', snap => {
-      const count = snap.val() || 0;
-      document.getElementById('awViewersCount').textContent =
-        count > 0 ? `👁️ ${count} مشاهد منضم` : '⏳ لا يوجد مشاهدون بعد...';
-    });
+    if (!awDb) {
+      document.getElementById('awViewersCount').textContent = '⚠️ Firebase غير متاح';
+      return;
+    }
+    try {
+      awRoomCode = awGenCode();
+      document.getElementById('awCodeDisplay').textContent = awRoomCode;
+      awRoomRef = awDb.ref('game_rooms/' + awRoomCode);
+      await awRoomRef.set({ host: true, viewers: 0, state: null, ts: Date.now() });
+      // حذف الغرفة عند انقطاع الاتصال
+      awRoomRef.onDisconnect().remove();
+      // مراقبة عدد المشاهدين
+      awRoomRef.child('viewers').on('value', snap => {
+        const count = snap.val() || 0;
+        document.getElementById('awViewersCount').textContent =
+          count > 0 ? `👁️ ${count} مشاهد${count > 1 ? 'ون' : ''} منضم${count > 1 ? 'ون' : ''}` : '⏳ لا يوجد مشاهدون بعد...';
+      });
+      console.log('[AW] Room created:', awRoomCode);
+    } catch(e) {
+      console.error('[AW] Room creation error:', e);
+      document.getElementById('awViewersCount').textContent = '⚠️ خطأ في إنشاء الغرفة: ' + (e.message || '');
+    }
   }
 
   // ════ بدء اللعبة كمقدم ════
@@ -10909,40 +10931,63 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   window.awJoinAsViewer = async function() {
     const code = document.getElementById('awCodeInp').value.trim();
     const statusEl = document.getElementById('awViewerStatus');
+
     if (code.length !== 6) {
       statusEl.textContent = '⚠️ الكود يجب أن يكون 6 أرقام';
       statusEl.className = 'aw-status error'; return;
     }
+
     if (!awDb) {
-      statusEl.textContent = '⚠️ Firebase غير متاح';
-      statusEl.className = 'aw-status error'; return;
+      // محاولة أخيرة لتهيئة Firebase
+      const ok = awInitFirebase();
+      if (!ok) {
+        statusEl.textContent = '❌ تعذر الاتصال بالخادم — تحقق من الإنترنت';
+        statusEl.className = 'aw-status error'; return;
+      }
     }
+
     statusEl.textContent = '⏳ جاري البحث عن الغرفة...';
     statusEl.className = 'aw-status';
-    const snap = await awDb.ref('game_rooms/' + code).once('value');
-    if (!snap.exists()) {
-      statusEl.textContent = '❌ الكود غير صحيح أو انتهت صلاحية الغرفة';
-      statusEl.className = 'aw-status error'; return;
+
+    try {
+      console.log('[AW] Looking for room:', code);
+      const snap = await awDb.ref('game_rooms/' + code).once('value');
+      console.log('[AW] Room snap exists:', snap.exists(), snap.val());
+
+      if (!snap.exists() || !snap.val()?.host) {
+        statusEl.textContent = '❌ الكود غير صحيح أو انتهت صلاحية الغرفة';
+        statusEl.className = 'aw-status error'; return;
+      }
+
+      statusEl.textContent = '✅ تم الانضمام! جاري التحميل...';
+      statusEl.className = 'aw-status success';
+
+      awRoomCode = code;
+      awRoomRef = awDb.ref('game_rooms/' + code);
+      awIsViewer = true;
+
+      // تسجيل المشاهد وتقليل العداد عند الخروج
+      await awRoomRef.child('viewers').transaction(v => (v || 0) + 1);
+      awRoomRef.child('viewers').onDisconnect().transaction(v => Math.max(0, (v || 1) - 1));
+
+      setTimeout(() => {
+        document.getElementById('awGameRoom').classList.add('hidden');
+        document.getElementById('awViewerBar').classList.add('show');
+        document.getElementById('awHostCode').textContent = 'كود: ' + code;
+        document.body.classList.add('aw-viewer-mode');
+        // الاستماع للحالة من المقدم
+        awRoomRef.child('state').on('value', snap => {
+          const state = snap.val();
+          console.log('[AW] State received:', !!state);
+          if (state) awApplyState(state);
+        });
+      }, 600);
+
+    } catch(err) {
+      console.error('[AW] Join error:', err);
+      statusEl.textContent = '❌ خطأ في الاتصال: ' + (err.message || 'غير معروف');
+      statusEl.className = 'aw-status error';
     }
-    statusEl.textContent = '✅ تم الانضمام!';
-    statusEl.className = 'aw-status success';
-    awRoomCode = code;
-    awRoomRef = awDb.ref('game_rooms/' + code);
-    awIsViewer = true;
-    // تسجيل المشاهد
-    awRoomRef.child('viewers').transaction(v => (v || 0) + 1);
-    awRoomRef.child('viewers').onDisconnect().transaction(v => Math.max(0, (v || 1) - 1));
-    setTimeout(() => {
-      document.getElementById('awGameRoom').classList.add('hidden');
-      document.getElementById('awViewerBar').classList.add('show');
-      document.getElementById('awHostCode').textContent = 'كود: ' + code;
-      document.body.classList.add('aw-viewer-mode');
-      // الاستماع للحالة
-      awRoomRef.child('state').on('value', snap => {
-        const state = snap.val();
-        if (state) awApplyState(state);
-      });
-    }, 800);
   };
 
   // ════ جمع حالة اللعبة الكاملة (للمقدم) ════
