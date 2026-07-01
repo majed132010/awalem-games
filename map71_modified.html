@@ -10900,12 +10900,12 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       awRoomCode = awGenCode();
       document.getElementById('awCodeDisplay').textContent = awRoomCode;
       awRoomRef = awDb.ref('game_rooms/' + awRoomCode);
-      await awRoomRef.set({ host: true, viewers: 0, state: null, ts: Date.now() });
+      await awRoomRef.set({ host: true, state: null, ts: Date.now() });
       // حذف الغرفة عند انقطاع الاتصال
       awRoomRef.onDisconnect().remove();
-      // مراقبة عدد المشاهدين
+      // مراقبة عدد المشاهدين — Presence Pattern: العدد = عدد الأطفال الفعلي، لا قيمة مكتوبة يدوياً
       awRoomRef.child('viewers').on('value', snap => {
-        const count = snap.val() || 0;
+        const count = snap.numChildren();
         document.getElementById('awViewersCount').textContent =
           count > 0 ? `👁️ ${count} مشاهد${count > 1 ? 'ون' : ''} منضم${count > 1 ? 'ون' : ''}` : '⏳ لا يوجد مشاهدون بعد...';
       });
@@ -10921,14 +10921,9 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     if (!awRoomCode) { awSkipRoom(); return; }
     awIsHost = true;
     document.getElementById('awGameRoom').classList.add('hidden');
-    // إرسال فوري أول مرة بدون شرط hash
-    awLastSyncHash = '';
-    awSendState();
-    // بدء إرسال الحالة كل 500ms
-    awSyncInterval = setInterval(() => {
-      awLastSyncHash = ''; // أجبر الإرسال دائماً
-      awSendState();
-    }, 500);
+    awSendState(); // أول إرسال — الـhash فاضي فينبعث تلقائياً
+    // بدء إرسال الحالة كل 500ms (يُرسل فعلياً فقط عند تغيّر الحالة، بفضل مقارنة الـhash)
+    awSyncInterval = setInterval(awSendState, 500);
     // إرسال فوري عند أي تغيير DOM
     awWatchDomChanges();
   };
@@ -10972,11 +10967,9 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       awRoomRef = awDb.ref('game_rooms/' + code);
       awIsViewer = true;
 
-      // تسجيل المشاهد وتقليل العداد عند الخروج
-      const viewersRef = awRoomRef.child('viewers');
-      const snap2 = await viewersRef.once('value');
-      await viewersRef.set((snap2.val() || 0) + 1);
-      viewersRef.onDisconnect().set(Math.max(0, (snap2.val() || 1) - 1));
+      // تسجيل المشاهد — Presence Pattern: كل مشاهد يضيف مفتاحه الخاص، يُحذف تلقائياً عند الانفصال
+      const myViewerRef = awRoomRef.child('viewers').push(true);
+      myViewerRef.onDisconnect().remove();
 
       // انتظر حتى يصل أول state حقيقي من المقدم قبل الدخول
       let enteredGame = false;
@@ -11048,11 +11041,16 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     } catch(e) { return null; }
   }
 
-  // ════ إرسال الحالة فوراً ════
+  // ════ إرسال الحالة فقط عند التغيير الفعلي ════
   function awSendState() {
     if (!awIsHost || !awRoomRef) return;
     const state = awCollectState();
     if (!state) return;
+    // نستثني ts من حساب الهاش لأنه يتغيّر كل استدعاء، وإلا ستفشل المقارنة دائماً
+    const { ts, ...stateForHash } = state;
+    const newHash = JSON.stringify(stateForHash);
+    if (newHash === awLastSyncHash) return;
+    awLastSyncHash = newHash;
     awRoomRef.child('state').set(state).catch(() => {});
   }
 
@@ -11073,6 +11071,26 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let _awGameStarted = false;
   let _awMapReady = false;
 
+  // ننتظر جاهزية الخريطة فعلياً: وجود مسارات الدول + تهيئة متغيّر projection
+  // (وجود SVG وحده لا يكفي لأن selectContinent يعتمد على projection المُهيّأ داخل loadMap بشكل غير متزامن)
+  function awWaitForMap(callback) {
+    const startTime = Date.now();
+    const TIMEOUT_MS = 15000;
+    function check() {
+      if (typeof projection !== 'undefined' && projection && document.querySelector('path[data-eng]')) {
+        callback(true);
+        return;
+      }
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        console.warn('[AW viewer] تجاوز وقت انتظار الخريطة (15s) — متابعة بأي حال');
+        callback(false);
+        return;
+      }
+      requestAnimationFrame(check);
+    }
+    check();
+  }
+
   function awApplyState(state) {
     if (!awIsViewer || !state) return;
     try {
@@ -11090,8 +11108,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           if (typeof startGame === 'function') {
             startGame();
             _awGameStarted = true;
-            // انتظر تحميل الخريطة (loadMap تحتاج ~1.5 ثانية)
-            setTimeout(() => { _awMapReady = true; }, 2000);
+            // انتظر جاهزية الخريطة فعلياً بدل تأخير ثابت
+            awWaitForMap(() => { _awMapReady = true; });
           }
           return;
         }
