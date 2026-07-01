@@ -10921,8 +10921,14 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     if (!awRoomCode) { awSkipRoom(); return; }
     awIsHost = true;
     document.getElementById('awGameRoom').classList.add('hidden');
-    // بدء إرسال الحالة كل 300ms
-    awSyncInterval = setInterval(awSendState, 300);
+    // إرسال فوري أول مرة بدون شرط hash
+    awLastSyncHash = '';
+    awSendState();
+    // بدء إرسال الحالة كل 500ms
+    awSyncInterval = setInterval(() => {
+      awLastSyncHash = ''; // أجبر الإرسال دائماً
+      awSendState();
+    }, 500);
     // إرسال فوري عند أي تغيير DOM
     awWatchDomChanges();
   };
@@ -11027,17 +11033,11 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     } catch(e) { console.warn('[AW] collectState error:', e); return null; }
   }
 
-  // ════ إرسال الحالة لـFirebase ════
   function awSendState() {
     if (!awIsHost || !awRoomRef) return;
     const state = awCollectState();
     if (!state) return;
-    const hash = JSON.stringify(state.htmlSnaps?.game?.cls) +
-                 JSON.stringify(state.htmlSnaps?.game?.countryColors) +
-                 JSON.stringify(state.htmlSnaps?.game?.inner?.questionScreen?.cls) +
-                 (state.htmlSnaps?.settings?.cls || '');
-    if (hash === awLastSyncHash) return;
-    awLastSyncHash = hash;
+    console.log('[AW host] sending state, settings cls:', state.htmlSnaps?.settings?.cls, 'game cls:', state.htmlSnaps?.game?.cls);
     awRoomRef.child('state').set(state).catch(e => console.warn('[AW] send error:', e));
   }
 
