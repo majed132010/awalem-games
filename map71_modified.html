@@ -10995,50 +10995,36 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   // ════ جمع حالة اللعبة الكاملة (للمقدم) ════
   function awCollectState() {
     try {
-      // حالة الشاشات النشطة
-      const screens = {};
-      document.querySelectorAll('.game-screen').forEach(s => {
-        screens[s.id] = s.classList.contains('active');
-      });
-
-      // ألوان الدول (occupied classes)
-      const countries = {};
-      document.querySelectorAll('.country-path, [class*="occupied-"]').forEach(el => {
-        const name = el.getAttribute('data-name') || el.id;
-        if (name) {
-          const cls = el.className?.baseVal || el.className || '';
-          if (cls.includes('occupied-blue')) countries[name] = 'blue';
-          else if (cls.includes('occupied-red')) countries[name] = 'red';
-        }
-      });
-
-      // النصوص المهمة على الشاشة
-      const texts = {};
-      ['score-blue', 'score-red', 'blueScore', 'redScore',
-       'turnIndicator', 'questionText', 'timerDisplay',
-       'questionScreen', 'continentName', 'winText'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) texts[id] = el.textContent?.slice(0, 200) || '';
-      });
-
-      // HTML الكامل لعناصر مهمة
       const htmlSnaps = {};
-      ['mapContainer', 'worldMap', 'questionScreen',
-       'numbersScreen', 'categoryModal', 'scorePanel',
-       'turnIndicator', 'continentScreen', 'gameOverScreen',
-       'conquerScreen', 'flashScreen', 'winOverlay'].forEach(id => {
+      ['splash', 'settings', 'game', 'gameOver'].forEach(id => {
         const el = document.getElementById(id);
-        if (el && el.classList.contains('active')) {
-          htmlSnaps[id] = el.innerHTML?.slice(0, 50000) || '';
+        if (!el) return;
+        // لشاشة game، أرسل فقط الكلاسات + الشاشات الداخلية النشطة (بدون SVG الخريطة الثقيل)
+        if (id === 'game') {
+          const inner = {};
+          // الشاشات الداخلية
+          ['questionScreen','numbersScreen','categoryModal',
+           'conquerModal','countryInfo','turnInd','backButton',
+           'continentList','scoreboard','scorePanel'].forEach(innerId => {
+            const innerEl = document.getElementById(innerId);
+            if (innerEl) inner[innerId] = { cls: innerEl.className, html: innerEl.innerHTML.slice(0, 10000) };
+          });
+          // ألوان الدول
+          const countryColors = {};
+          document.querySelectorAll('[class*="occupied-"]').forEach(el => {
+            const name = el.id || el.getAttribute('data-name');
+            if (!name) return;
+            const cls = el.className?.baseVal || el.className || '';
+            if (cls.includes('occupied-blue')) countryColors[name] = 'b';
+            else if (cls.includes('occupied-red')) countryColors[name] = 'r';
+          });
+          htmlSnaps[id] = { cls: el.className, inner, countryColors };
+        } else {
+          htmlSnaps[id] = { cls: el.className, html: el.innerHTML.slice(0, 20000) };
         }
       });
-
-      // SVG الخريطة (مصغّر)
-      const mapEl = document.querySelector('#worldMap svg, #mapContainer svg');
-      const mapSvgHtml = mapEl ? mapEl.outerHTML.slice(0, 200000) : '';
-
-      return { screens, countries, texts, htmlSnaps, mapSvgHtml, ts: Date.now() };
-    } catch(e) { return null; }
+      return { htmlSnaps, ts: Date.now() };
+    } catch(e) { console.warn('[AW] collectState error:', e); return null; }
   }
 
   // ════ إرسال الحالة لـFirebase ════
@@ -11046,18 +11032,20 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     if (!awIsHost || !awRoomRef) return;
     const state = awCollectState();
     if (!state) return;
-    // فقط أرسل إذا تغيّر شيء (تجنّب requests زائدة)
-    const hash = JSON.stringify(state.screens) + JSON.stringify(state.countries) + JSON.stringify(state.texts);
+    const hash = JSON.stringify(state.htmlSnaps?.game?.cls) +
+                 JSON.stringify(state.htmlSnaps?.game?.countryColors) +
+                 JSON.stringify(state.htmlSnaps?.game?.inner?.questionScreen?.cls) +
+                 (state.htmlSnaps?.settings?.cls || '');
     if (hash === awLastSyncHash) return;
     awLastSyncHash = hash;
-    awRoomRef.child('state').set(state).catch(() => {});
+    awRoomRef.child('state').set(state).catch(e => console.warn('[AW] send error:', e));
   }
 
   // ════ مراقبة تغييرات DOM (إضافية للمقدم) ════
   function awWatchDomChanges() {
     const observer = new MutationObserver(() => {
       clearTimeout(window._awMutTimer);
-      window._awMutTimer = setTimeout(awSendState, 100);
+      window._awMutTimer = setTimeout(awSendState, 200);
     });
     observer.observe(document.body, {
       childList: true, subtree: true,
@@ -11067,49 +11055,45 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
   // ════ تطبيق الحالة عند المشاهد ════
   function awApplyState(state) {
-    if (!awIsViewer || !state) return;
+    if (!awIsViewer || !state?.htmlSnaps) return;
     try {
-      // تطبيق SVG الخريطة كاملاً إذا تغيّر
-      if (state.mapSvgHtml) {
-        const mapContainer = document.querySelector('#worldMap, #mapContainer');
-        if (mapContainer) {
-          const currentSvg = mapContainer.querySelector('svg');
-          if (currentSvg) {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = state.mapSvgHtml;
-            const newSvg = tmp.querySelector('svg');
-            if (newSvg && newSvg.outerHTML !== currentSvg.outerHTML) {
-              currentSvg.replaceWith(newSvg);
-            }
-          }
+      const snaps = state.htmlSnaps;
+
+      // الشاشات غير game
+      ['splash','settings','gameOver'].forEach(id => {
+        const el = document.getElementById(id);
+        const data = snaps[id];
+        if (!el || !data) return;
+        if (el.className !== data.cls) el.className = data.cls;
+        if (data.html !== undefined && el.innerHTML !== data.html) el.innerHTML = data.html;
+      });
+
+      // شاشة game
+      const gameEl = document.getElementById('game');
+      const gameData = snaps.game;
+      if (gameEl && gameData) {
+        if (gameEl.className !== gameData.cls) gameEl.className = gameData.cls;
+
+        // تطبيق ألوان الدول على الخريطة
+        if (gameData.countryColors) {
+          Object.entries(gameData.countryColors).forEach(([name, color]) => {
+            const el = document.getElementById(name);
+            if (!el) return;
+            el.classList.remove('occupied-blue','occupied-red');
+            if (color === 'b') el.classList.add('occupied-blue');
+            else if (color === 'r') el.classList.add('occupied-red');
+          });
         }
-      }
 
-      // تطبيق HTML للشاشات النشطة
-      if (state.htmlSnaps) {
-        Object.entries(state.htmlSnaps).forEach(([id, html]) => {
-          const el = document.getElementById(id);
-          if (el && html) {
-            el.innerHTML = html;
-            el.classList.add('active');
-          }
-        });
-      }
-
-      // تطبيق حالة الشاشات (active/inactive)
-      if (state.screens) {
-        Object.entries(state.screens).forEach(([id, isActive]) => {
-          const el = document.getElementById(id);
-          if (el) el.classList.toggle('active', isActive);
-        });
-      }
-
-      // تطبيق النصوص
-      if (state.texts) {
-        Object.entries(state.texts).forEach(([id, text]) => {
-          const el = document.getElementById(id);
-          if (el && el.textContent !== text) el.textContent = text;
-        });
+        // تطبيق الشاشات الداخلية
+        if (gameData.inner) {
+          Object.entries(gameData.inner).forEach(([innerId, data]) => {
+            const innerEl = document.getElementById(innerId);
+            if (!innerEl || !data) return;
+            if (innerEl.className !== data.cls) innerEl.className = data.cls;
+            if (data.html !== undefined && innerEl.innerHTML !== data.html) innerEl.innerHTML = data.html;
+          });
+        }
       }
     } catch(e) { console.warn('[AW viewer] apply error:', e); }
   }
