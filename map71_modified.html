@@ -11023,12 +11023,10 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       };
 
       if (isInGame) {
-        // حالة القارة والزوم
         state.continent = typeof currentContinent !== 'undefined' ? currentContinent : null;
         state.zoomed = typeof zoomed !== 'undefined' ? zoomed : false;
         state.turn = typeof currentTurn !== 'undefined' ? currentTurn : 'blue';
 
-        // النتائج
         if (typeof teams !== 'undefined') {
           state.scores = {
             b: teams.blue?.score || 0, r: teams.red?.score || 0,
@@ -11036,35 +11034,21 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           };
         }
 
-        // الشاشة النشطة
+        // الشاشة النشطة — فقط السؤال والمربعات للمشاهد
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
-        const cEl = document.getElementById('categoryModal');
-        const wEl = document.getElementById('fortuneWheelModal') || document.querySelector('.fortune-wheel-modal');
         state.panel = qEl?.classList.contains('active') ? 'q'
-          : nEl?.classList.contains('active') ? 'n'
-          : cEl?.classList.contains('active') ? 'c'
-          : wEl?.classList.contains('active') ? 'w' : 'm';
+          : nEl?.classList.contains('active') ? 'n' : 'm';
         if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0, 12000);
         if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0, 12000);
-        if (state.panel === 'c') state.ph = cEl.innerHTML.slice(0, 12000);
-        if (state.panel === 'w') state.ph = wEl?.innerHTML?.slice(0, 8000) || '';
 
-        // ألوان الدول
-        const col = {};
-        document.querySelectorAll('[class*="occupied-"]').forEach(el => {
-          if (!el.id) return;
-          const c = el.className?.baseVal || el.className || '';
-          if (c.includes('occupied-blue')) col[el.id] = 'b';
-          else if (c.includes('occupied-red')) col[el.id] = 'r';
-        });
-        state.col = col;
+        // ملاحظة: العجلة (categoryModal) واختيار الدولة (countryInfo) لا تُرسل للمشاهد
       }
       return state;
     } catch(e) { return null; }
   }
 
-  // ════ إرسال الحالة ════
+  // ════ إرسال الحالة فوراً ════
   function awSendState() {
     if (!awIsHost || !awRoomRef) return;
     const state = awCollectState();
@@ -11076,7 +11060,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   function awWatchDomChanges() {
     const observer = new MutationObserver(() => {
       clearTimeout(window._awMutTimer);
-      window._awMutTimer = setTimeout(awSendState, 300);
+      window._awMutTimer = setTimeout(awSendState, 150);
     });
     observer.observe(document.body, {
       childList: true, subtree: true,
@@ -11087,6 +11071,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   // ════ تطبيق الحالة عند المشاهد ════
   let _awLastContinent = null;
   let _awGameStarted = false;
+  let _awMapReady = false;
 
   function awApplyState(state) {
     if (!awIsViewer || !state) return;
@@ -11095,7 +11080,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         const gameEl = document.getElementById('game');
 
         // ابدأ اللعبة إذا لم تبدأ بعد
-        if (!_awGameStarted || !gameEl?.classList.contains('active')) {
+        if (!_awGameStarted) {
           if (state.teams) {
             const nb = document.getElementById('nameBlue');
             const nr = document.getElementById('nameRed');
@@ -11105,47 +11090,35 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           if (typeof startGame === 'function') {
             startGame();
             _awGameStarted = true;
+            // انتظر تحميل الخريطة (loadMap تحتاج ~1.5 ثانية)
+            setTimeout(() => { _awMapReady = true; }, 2000);
           }
-          return; // انتظر تحميل الخريطة ثم تطبيق باقي الحالة
+          return;
         }
 
-        // مزامنة القارة — استدعاء selectContinent مباشرة
-        if (state.zoomed && state.continent && state.continent !== _awLastContinent) {
-          _awLastContinent = state.continent;
-          if (typeof selectContinent === 'function') {
-            setTimeout(() => selectContinent(state.continent), 100);
+        // انتظر جاهزية الخريطة قبل تطبيق القارة
+        if (!_awMapReady) return;
+
+        // مزامنة القارة — استدعاء selectContinent مباشرة بدون timeout
+        if (state.zoomed && state.continent) {
+          if (state.continent !== _awLastContinent) {
+            _awLastContinent = state.continent;
+            if (typeof selectContinent === 'function') selectContinent(state.continent);
           }
         } else if (!state.zoomed && _awLastContinent) {
           _awLastContinent = null;
           if (typeof showContinents === 'function') showContinents();
         }
 
-        // تطبيق ألوان الدول
-        if (state.col) {
-          Object.entries(state.col).forEach(([id, c]) => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.classList.remove('occupied-blue','occupied-red');
-            if (c === 'b') el.classList.add('occupied-blue');
-            else if (c === 'r') el.classList.add('occupied-red');
-          });
-        }
-
-        // تطبيق الشاشة النشطة
+        // تطبيق الشاشة النشطة — السؤال والمربعات فقط
         const qEl = document.getElementById('questionScreen');
         const nEl = document.getElementById('numbersScreen');
-        const cEl = document.getElementById('categoryModal');
-        const wEl = document.getElementById('fortuneWheelModal') || document.querySelector('.fortune-wheel-modal');
-        [qEl, nEl, cEl, wEl].forEach(el => el?.classList.remove('active'));
+        [qEl, nEl].forEach(el => el?.classList.remove('active'));
 
         if (state.panel === 'q' && state.ph && qEl) {
           qEl.innerHTML = state.ph; qEl.classList.add('active');
         } else if (state.panel === 'n' && state.ph && nEl) {
           nEl.innerHTML = state.ph; nEl.classList.add('active');
-        } else if (state.panel === 'c' && state.ph && cEl) {
-          cEl.innerHTML = state.ph; cEl.classList.add('active');
-        } else if (state.panel === 'w' && state.ph && wEl) {
-          wEl.innerHTML = state.ph; wEl.classList.add('active');
         }
       }
 
