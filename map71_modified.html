@@ -11137,57 +11137,169 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 })();
 
 </script>
-    <script>
-/* ===== DOM SYNC — مزامنة التلوين ===== */
+   <script>
+/* ===== SCREEN SYNC — بث مباشر تلقائي ===== */
 (function(){
-  function waitForVars(){
-    if(!window.awDb || !window.awRoomCode || window.awIsHost == null){
-      setTimeout(waitForVars, 400);
+  'use strict';
+
+  var ICE = [{urls:'stun:stun.l.google.com:19302'}];
+  var pc, syncRef;
+  var isHost = window.awIsHost;
+  var room = window.awRoomCode;
+  var db = window.awDb;
+
+  function log(){
+    var a = ['[SS]'];
+    for(var i=0;i<arguments.length;i++) a.push(arguments[i]);
+    console.log.apply(console,a);
+  }
+
+  /* ═══════════════════════════════════
+     المقدم: يلتقط عند الضغط على "ابدأ"
+     ═══════════════════════════════════ */
+  if(isHost){
+    document.addEventListener('click', async function handler(e){
+      var btn = e.target.closest('button');
+      if(!btn) return;
+      var txt = (btn.textContent || '').toLowerCase();
+      if(txt.indexOf('ابدأ') > -1 || txt.indexOf('بدء') > -1 || txt.indexOf('start') > -1 || txt.indexOf('معركة') > -1 || txt.indexOf('لعبة') > -1){
+        document.removeEventListener('click', handler);
+        log('Start button clicked! Capturing...');
+
+        var stream;
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {width: 1280, height: 720, frameRate: 10},
+            audio: false
+          });
+        } catch(err){
+          log('Capture failed', err);
+          return;
+        }
+
+        log('Captured. Waiting for Firebase...');
+        waitThenStart(stream);
+      }
+    });
+  }
+
+  function waitThenStart(stream){
+    if(!window.awDb || !window.awRoomCode){
+      setTimeout(function(){ waitThenStart(stream); }, 300);
       return;
     }
-    startSync();
+
+    db = window.awDb; room = window.awRoomCode;
+    syncRef = db.ref('rooms/' + room + '/screenSync');
+    syncRef.remove().catch(function(){});
+
+    pc = new RTCPeerConnection({iceServers: ICE});
+    stream.getTracks().forEach(function(t){ pc.addTrack(t, stream); });
+
+    pc.onicecandidate = function(e){
+      if(e.candidate) syncRef.child('hostIce').push(e.candidate.toJSON());
+    };
+
+    pc.createOffer().then(function(offer){
+      return pc.setLocalDescription(offer);
+    }).then(function(){
+      return syncRef.child('offer').set(pc.localDescription.toJSON());
+    }).then(function(){
+      log('Offer sent');
+    });
+
+    syncRef.child('answer').on('value', async function(snap){
+      var ans = snap.val();
+      if(ans && pc.signalingState === 'have-local-offer'){
+        await pc.setRemoteDescription(new RTCSessionDescription(ans));
+        log('Viewer connected!');
+      }
+    });
+
+    syncRef.child('viewerIce').on('child_added', async function(snap){
+      try{ await pc.addIceCandidate(new RTCIceCandidate(snap.val())); } catch(e){}
+    });
+
+    stream.getVideoTracks()[0].onended = function(){
+      log('Capture stopped');
+      if(pc) pc.close();
+      if(syncRef) syncRef.remove().catch(function(){});
+    };
   }
 
-  function startSync(){
-    var db = window.awDb, room = window.awRoomCode, isHost = window.awIsHost;
-    console.log('[DOMSync] Ready. Host=' + isHost);
+  /* ═══════════════════════════════════
+     المشاهد: يستقبل فور دخول الغرفة
+     ═══════════════════════════════════ */
+  if(!isHost){
+    setupViewer();
+  }
 
-    if(isHost){
-      var lastColors = {};
-      setInterval(function(){
-        document.querySelectorAll('path[data-eng]').forEach(function(p){
-          var c = p.getAttribute('data-eng');
-          if(!c) return;
-          var cls = p.className.baseVal || p.className || '';
-          var color = '';
-          if(cls.indexOf('occupied-blue') > -1) color = 'blue';
-          else if(cls.indexOf('occupied-red') > -1) color = 'red';
-          else if(cls.indexOf('occupied-green') > -1) color = 'green';
-          else if(cls.indexOf('occupied-yellow') > -1) color = 'yellow';
+  function setupViewer(){
+    var overlay = document.createElement('div');
+    overlay.id = 'ssOverlay';
+    overlay.innerHTML =
+      '<div style="position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;background:#000;font-family:Tajawal,sans-serif;">' +
+        '<div style="height:48px;background:linear-gradient(90deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid rgba(200,168,75,0.2);">' +
+          '<span style="color:#c8a84b;font-size:15px;font-weight:700;">📺 شاشة المقدم</span>' +
+          '<span id="ssStatus" style="color:rgba(255,255,255,0.7);font-size:12px;">⏳ في انتظار بدء المعركة...</span>' +
+          '<button onclick="window._ssStop()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;">✕</button>' +
+        '</div>' +
+        '<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#000;">' +
+          '<video id="ssVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;"></video>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
 
-          if(color && lastColors[c] !== color){
-            lastColors[c] = color;
-            db.ref('rooms/'+room+'/colors/'+c).set(color);
-            console.log('[DOMSync] Sent:', c, color);
-          }
-        });
-      }, 300);
-    } else {
-      db.ref('rooms/'+room+'/colors').on('value', function(snap){
-        var colors = snap.val() || {};
-        for(var c in colors){
-          var color = colors[c];
-          document.querySelectorAll('path[data-eng="'+c+'"]').forEach(function(p){
-            p.classList.remove('occupied-blue','occupied-red','occupied-green','occupied-yellow');
-            if(color) p.classList.add('occupied-'+color);
-          });
+    var video = document.getElementById('ssVideo');
+    var status = document.getElementById('ssStatus');
+
+    function waitForDb(){
+      if(!window.awDb || !window.awRoomCode){
+        setTimeout(waitForDb, 400);
+        return;
+      }
+      db = window.awDb; room = window.awRoomCode;
+      syncRef = db.ref('rooms/' + room + '/screenSync');
+
+      pc = new RTCPeerConnection({iceServers: ICE});
+      window._ssPC = pc;
+
+      pc.ontrack = function(e){
+        if(video.srcObject !== e.streams[0]){
+          video.srcObject = e.streams[0];
+          video.play().catch(function(){});
+          status.textContent = '🔴 بث مباشر';
+          log('Stream received!');
         }
-        console.log('[DOMSync] Applied', Object.keys(colors).length, 'colors');
+      };
+
+      pc.onicecandidate = function(e){
+        if(e.candidate) syncRef.child('viewerIce').push(e.candidate.toJSON());
+      };
+
+      syncRef.child('offer').on('value', async function(snap){
+        var offer = snap.val();
+        if(!offer || pc.signalingState !== 'stable') return;
+        log('Offer received');
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        var answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await syncRef.child('answer').set(answer.toJSON());
+        log('Answer sent');
+      });
+
+      syncRef.child('hostIce').on('child_added', async function(snap){
+        try{ await pc.addIceCandidate(new RTCIceCandidate(snap.val())); } catch(e){}
       });
     }
-  }
 
-  waitForVars();
+    window._ssStop = function(){
+      if(pc) pc.close();
+      overlay.remove();
+    };
+
+    waitForDb();
+  }
 })();
 </script>
 </body>
