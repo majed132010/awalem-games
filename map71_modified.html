@@ -10604,6 +10604,7 @@
     <script>
         (function() {
             var audio = document.getElementById('bgMusic');
+            if (!audio) return; // العنصر غير موجود في الصفحة — تجنّب كسر باقي الكود
             audio.volume = 0.40;
             function tryPlay() {
                 audio.play().catch(function() {
