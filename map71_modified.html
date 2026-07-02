@@ -9490,6 +9490,11 @@
             const totalRotation = 360 * 10 + extraDegrees;
             currentRotation += totalRotation;
             const selected = getWheelCategoryAtAngle(currentRotation);
+            // ═ Awalem Live: بث حدث خفيف (زاوية + فئة) بدل لقطة HTML ثقيلة، ليشغّل المشاهد نفس الحركة محلياً ═
+            if (typeof awIsHost !== 'undefined' && awIsHost) {
+                window._awWheelEventId = (window._awWheelEventId || 0) + 1;
+                window._awPendingWheelEvent = { id: window._awWheelEventId, rot: currentRotation, cat: selected.name };
+            }
             let liveDisplayActive = true;
 
             const updateLiveCategoryDisplay = () => {
@@ -9616,6 +9621,11 @@
 
             // اختيار الفائز مسبقاً
             const winnerIndex = Math.floor(Math.random() * cats.length);
+            // ═ Awalem Live: بث اسم الفائز مباشرة ليعيد المشاهد نفس تأثير الوميض محلياً وينتهي على نفس النتيجة ═
+            if (typeof awIsHost !== 'undefined' && awIsHost) {
+                window._awFlashEventId = (window._awFlashEventId || 0) + 1;
+                window._awPendingFlashEvent = { id: window._awFlashEventId, winner: cats[winnerIndex].name };
+            }
 
             function clearActive() {
                 cards.forEach(c => c.classList.remove('flash-active'));
@@ -11037,10 +11047,18 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         if (state.panel === 'q') state.ph = qEl.innerHTML.slice(0, 12000);
         if (state.panel === 'n') state.ph = nEl.innerHTML.slice(0, 12000);
 
-        // نافذة اختيار الفئة (العجلة / الوميض / اليدوي) — تُرسل كاملة ليراها المشاهد لحظياً
+        // نافذة اختيار الفئة (العجلة / الوميض / اليدوي)
         const catEl = document.getElementById('categoryModal');
         state.catActive = !!catEl?.classList.contains('active');
-        if (state.catActive) state.catHtml = catEl.innerHTML.slice(0, 20000);
+        // لا نرسل HTML كامل أثناء الدوران الفعلي (يكسر حركة CSS عند المشاهد) — نعتمد بدلها على حدث خفيف أدناه
+        const isCurrentlySpinning = (typeof isSpinning !== 'undefined' && isSpinning)
+          || (typeof flashInterval !== 'undefined' && flashInterval);
+        if (state.catActive && !isCurrentlySpinning) {
+          state.catHtml = catEl.innerHTML.slice(0, 20000);
+        }
+        // أحدث حدث دوران عجلة / وميض — يُستخدم لتشغيل نفس الحركة محلياً عند المشاهد
+        if (window._awPendingWheelEvent) state.wheelEvt = window._awPendingWheelEvent;
+        if (window._awPendingFlashEvent) state.flashEvt = window._awPendingFlashEvent;
 
         // قائمة الدول المحتلة (اللون + الفريق) — كي يلوّن المشاهد نفس الدول على خريطته
         try {
@@ -11084,6 +11102,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let _awLastContinent = null;
   let _awGameStarted = false;
   let _awMapReady = false;
+  let _awLastWheelEvtId = 0;
+  let _awLastFlashEvtId = 0;
 
   // ننتظر جاهزية الخريطة فعلياً: وجود مسارات الدول + تهيئة متغيّر projection
   // (وجود SVG وحده لا يكفي لأن selectContinent يعتمد على projection المُهيّأ داخل loadMap بشكل غير متزامن)
@@ -11103,6 +11123,94 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       requestAnimationFrame(check);
     }
     check();
+  }
+
+  // ════ تشغيل حركة العجلة محلياً عند المشاهد (بدل استقبال صور متتالية) ════
+  function awReplicateWheelSpin(rot, catName) {
+    try {
+      const catEl = document.getElementById('categoryModal');
+      const wheelContent = document.getElementById('wheelModeContent');
+      const flashContent = document.getElementById('flashModeContent');
+      const manualContent = document.getElementById('manualModeContent');
+      if (!catEl) return;
+      catEl.classList.add('active');
+      if (wheelContent) wheelContent.style.display = '';
+      if (flashContent) flashContent.style.display = 'none';
+      if (manualContent) manualContent.style.display = 'none';
+
+      if (typeof buildFortuneWheel === 'function') buildFortuneWheel();
+      const wheel = document.getElementById('fortuneWheel');
+      const display = document.getElementById('selectedCategoryDisplay');
+      if (!wheel) return;
+      if (display) display.textContent = '';
+
+      // إجبار المتصفح يرسم الوضع الحالي أول، كي تشتغل حركة الانتقال (transition) بشكل صحيح
+      void wheel.offsetWidth;
+      wheel.style.transform = `rotate(${rot}deg)`;
+
+      setTimeout(() => {
+        if (display) display.textContent = `الفئة: ${catName}`;
+      }, 5000);
+    } catch(e) { console.warn('[AW viewer] خطأ بتشغيل حركة العجلة', e); }
+  }
+
+  // ════ تشغيل حركة الوميض محلياً عند المشاهد، تنتهي على نفس الفئة الفائزة عند المقدم ════
+  function awReplicateFlashSpin(winnerName) {
+    try {
+      const catEl = document.getElementById('categoryModal');
+      const wheelContent = document.getElementById('wheelModeContent');
+      const flashContent = document.getElementById('flashModeContent');
+      const manualContent = document.getElementById('manualModeContent');
+      if (!catEl) return;
+      catEl.classList.add('active');
+      if (wheelContent) wheelContent.style.display = 'none';
+      if (flashContent) flashContent.style.display = '';
+      if (manualContent) manualContent.style.display = 'none';
+
+      const cats = (typeof getActualCategories === 'function') ? getActualCategories() : [];
+      const grid = document.getElementById('flashGrid');
+      const status = document.getElementById('flashStatus');
+      if (!grid) return;
+      grid.innerHTML = '';
+      if (status) status.textContent = '⚡ الوميض يبدأ الآن...';
+      cats.forEach(cat => {
+        const card = document.createElement('div');
+        card.className = 'flash-card';
+        card.style.background = `linear-gradient(135deg, ${cat.color}, ${cat.color}cc)`;
+        card.style.setProperty('--flash-color', cat.color);
+        card.innerHTML = `<span class="flash-icon">${cat.icon}</span><span class="flash-label">${cat.name}</span>`;
+        grid.appendChild(card);
+      });
+
+      const cards = Array.from(grid.querySelectorAll('.flash-card'));
+      const winnerIdx = cats.findIndex(c => c.name === winnerName);
+      let elapsed = 0;
+      const totalDuration = 4000;
+      const baseInterval = 80;
+
+      function step() {
+        const progress = elapsed / totalDuration;
+        const interval = baseInterval + (progress * progress * 420);
+        cards.forEach(c => c.classList.remove('flash-active'));
+        let idx = Math.floor(Math.random() * cards.length);
+        if (progress > 0.75 && winnerIdx >= 0 && Math.random() < (progress - 0.75) / 0.25 * 0.7) {
+          idx = winnerIdx;
+        }
+        if (cards[idx]) cards[idx].classList.add('flash-active');
+        elapsed += interval;
+        if (elapsed < totalDuration) {
+          setTimeout(step, interval);
+        } else {
+          cards.forEach(c => c.classList.remove('flash-active'));
+          if (winnerIdx >= 0 && cards[winnerIdx]) {
+            cards[winnerIdx].classList.add('flash-winner');
+            setTimeout(() => cards[winnerIdx].classList.remove('flash-winner'), 1800);
+          }
+          if (status) status.textContent = `✨ الفئة المختارة: ${winnerName}`;
+        }
+      }
+      setTimeout(step, baseInterval);
+    } catch(e) { console.warn('[AW viewer] خطأ بتشغيل حركة الوميض', e); }
   }
 
   function awApplyState(state) {
@@ -11153,15 +11261,27 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           nEl.innerHTML = state.ph; nEl.classList.add('active');
         }
 
-        // تطبيق نافذة الفئة/العجلة كما هي عند المقدم
+        // تطبيق نافذة الفئة/العجلة — الفتح/الإغلاق يعتمد على catActive فقط
+        // (تحديث المحتوى منفصل: لا يصير أثناء الدوران الفعلي كي لا يكسر حركة الانتقال المحلية)
         const catEl = document.getElementById('categoryModal');
         if (catEl) {
-          if (state.catActive && state.catHtml) {
-            catEl.innerHTML = state.catHtml;
+          if (state.catActive) {
             catEl.classList.add('active');
+            if (state.catHtml) catEl.innerHTML = state.catHtml;
           } else {
             catEl.classList.remove('active');
           }
+        }
+
+        // تشغيل حركة العجلة محلياً عند وصول حدث دوران جديد من المقدم
+        if (state.wheelEvt && state.wheelEvt.id > _awLastWheelEvtId) {
+          _awLastWheelEvtId = state.wheelEvt.id;
+          awReplicateWheelSpin(state.wheelEvt.rot, state.wheelEvt.cat);
+        }
+        // تشغيل حركة الوميض محلياً عند وصول حدث وميض جديد من المقدم
+        if (state.flashEvt && state.flashEvt.id > _awLastFlashEvtId) {
+          _awLastFlashEvtId = state.flashEvt.id;
+          awReplicateFlashSpin(state.flashEvt.winner);
         }
 
         // تلوين الدول المحتلة على خريطة المشاهد لتطابق خريطة المقدم
