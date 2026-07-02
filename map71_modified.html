@@ -790,7 +790,7 @@
             cursor: pointer; z-index: 100; display: none;
             transition: all 0.3s; border-radius: 6px;
         }
-        .back-button.show { display: block; }
+        .back-button.show { display: none !important; } /* أُخفي بناءً على طلب المستخدم */
         .back-button:hover {
             background: rgba(201,168,76,0.3);
             box-shadow: 0 0 15px rgba(201,168,76,0.4);
@@ -3294,6 +3294,11 @@
         }
 
         function playSound(type) {
+            // ═ Awalem Live: بث نوع الصوت للمشاهدين (باستثناء الأصوات السريعة المتكررة أثناء الدوران) ═
+            if (window.awIsHost && type !== 'wheelTick' && type !== 'flashTick' && type !== 'wheelSpin') {
+                window._awSoundEventId = (window._awSoundEventId || 0) + 1;
+                window._awPendingSoundEvent = { id: window._awSoundEventId, type };
+            }
             initAudio();
             if(!audioCtx) return;
             switch(type) {
@@ -9491,7 +9496,7 @@
             currentRotation += totalRotation;
             const selected = getWheelCategoryAtAngle(currentRotation);
             // ═ Awalem Live: بث حدث خفيف (زاوية + فئة) بدل لقطة HTML ثقيلة، ليشغّل المشاهد نفس الحركة محلياً ═
-            if (typeof awIsHost !== 'undefined' && awIsHost) {
+            if (window.awIsHost) {
                 window._awWheelEventId = (window._awWheelEventId || 0) + 1;
                 window._awPendingWheelEvent = { id: window._awWheelEventId, rot: currentRotation, cat: selected.name };
             }
@@ -9622,7 +9627,7 @@
             // اختيار الفائز مسبقاً
             const winnerIndex = Math.floor(Math.random() * cats.length);
             // ═ Awalem Live: بث اسم الفائز مباشرة ليعيد المشاهد نفس تأثير الوميض محلياً وينتهي على نفس النتيجة ═
-            if (typeof awIsHost !== 'undefined' && awIsHost) {
+            if (window.awIsHost) {
                 window._awFlashEventId = (window._awFlashEventId || 0) + 1;
                 window._awPendingFlashEvent = { id: window._awFlashEventId, winner: cats[winnerIndex].name };
             }
@@ -11012,6 +11017,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     }
     try {
       awRoomCode = awGenCode();
+      window.awRoomCode = awRoomCode; // إتاحته للصفحة الأم (لو اللعبة مضمّنة بتطبيق ثاني)
       document.getElementById('awCodeDisplay').textContent = awRoomCode;
       awRoomRef = awDb.ref('game_rooms/' + awRoomCode);
       await awRoomRef.set({ host: true, state: null, ts: Date.now() });
@@ -11043,6 +11049,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   window.awStartAsHost = function() {
     if (!awRoomCode) { awSkipRoom(); return; }
     awIsHost = true;
+    window.awIsHost = true; // إتاحة القيمة لكود اللعبة الأصلي خارج نطاق هذا الملف المغلق
     document.getElementById('awGameRoom').classList.add('hidden');
     // إظهار شريط الكود العلوي — يبقى ظاهراً طوال اللعب ليقدر أي أحد ينضم بأي وقت
     const hostBar = document.getElementById('awHostBar');
@@ -11095,6 +11102,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       statusEl.className = 'aw-status';
 
       awRoomCode = code;
+      window.awRoomCode = code;
       awRoomRef = awDb.ref('game_rooms/' + code);
       awIsViewer = true;
 
@@ -11180,6 +11188,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         // أحدث حدث دوران عجلة / وميض — يُستخدم لتشغيل نفس الحركة محلياً عند المشاهد
         if (window._awPendingWheelEvent) state.wheelEvt = window._awPendingWheelEvent;
         if (window._awPendingFlashEvent) state.flashEvt = window._awPendingFlashEvent;
+        // أحدث حدث صوت — يُشغَّل نفس الصوت محلياً عند المشاهد (بدون نقل ملفات، الصوت مُصنَّع بالكود)
+        if (window._awPendingSoundEvent) state.soundEvt = window._awPendingSoundEvent;
 
         // نافذة "حلها واحتلّها" — لقطة كاملة (بدون حركة CSS مستمرة، فتُرسل بأمان)
         const conqEl = document.getElementById('conquerModal');
@@ -11238,6 +11248,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let _awMapReady = false;
   let _awLastWheelEvtId = 0;
   let _awLastFlashEvtId = 0;
+  let _awLastSoundEvtId = 0;
   let _awFlaggedCountries = new Set();
   let _awAnswerRevealedOnce = false;
 
@@ -11411,6 +11422,11 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         if (state.flashEvt && state.flashEvt.id > _awLastFlashEvtId) {
           _awLastFlashEvtId = state.flashEvt.id;
           awReplicateFlashSpin(state.flashEvt.winner);
+        }
+        // تشغيل نفس الصوت محلياً عند وصول حدث صوت جديد من المقدم — كي لا تكون الشاشة صمّاء
+        if (state.soundEvt && state.soundEvt.id > _awLastSoundEvtId) {
+          _awLastSoundEvtId = state.soundEvt.id;
+          if (typeof playSound === 'function') { try { playSound(state.soundEvt.type); } catch(e) {} }
         }
 
         // تطبيق نافذة الفئة/العجلة — الفتح/الإغلاق يعتمد على catActive
