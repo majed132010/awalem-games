@@ -3480,7 +3480,7 @@
                 document.getElementById('worldMap').innerHTML = '';
                 const w = document.getElementById('worldMap').offsetWidth;
                 const h = document.getElementById('worldMap').offsetHeight;
-                mapSvg = d3.select('#worldMap').append('svg').attr('width',w).attr('height',h).attr('viewBox',`0 0 ${w} ${h}`);
+                mapSvg = d3.select('#worldMap').append('svg').attr('width',w).attr('height',h).attr('viewBox',`0 0 ${w} ${h}`).attr('preserveAspectRatio','xMidYMid slice');
                 projection = d3.geoNaturalEarth1().scale(w/5.5).translate([w/2,h/2]);
                 path = d3.geoPath().projection(projection);
                 const defs = mapSvg.append('defs');
@@ -10823,6 +10823,13 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   <div id="awHostCode" style="font-size:12px;color:rgba(255,255,255,0.4)"></div>
 </div>
 
+<!-- شريط المقدم أثناء اللعبة — يبقى الكود ظاهر دائماً لينضم أي أحد بأي وقت -->
+<div id="awHostBar" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9998; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); align-items:center; justify-content:center; gap:12px; padding:8px 16px; font-family:'Tajawal',sans-serif; border-bottom:1px solid rgba(200,168,75,0.2);">
+  <div class="aw-live-dot"></div>
+  <div class="aw-viewer-badge">🔴 بث مباشر</div>
+  <div id="awHostBarCode" style="font-size:13px;color:#c8a84b;font-weight:700;cursor:pointer" onclick="awCopyCode()" title="انقر للنسخ"></div>
+</div>
+
 <script>
 (function() {
   'use strict';
@@ -11037,6 +11044,13 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     if (!awRoomCode) { awSkipRoom(); return; }
     awIsHost = true;
     document.getElementById('awGameRoom').classList.add('hidden');
+    // إظهار شريط الكود العلوي — يبقى ظاهراً طوال اللعب ليقدر أي أحد ينضم بأي وقت
+    const hostBar = document.getElementById('awHostBar');
+    if (hostBar) {
+      hostBar.style.display = 'flex';
+      const codeEl = document.getElementById('awHostBarCode');
+      if (codeEl) codeEl.textContent = 'كود الانضمام: ' + awRoomCode;
+    }
     awSendState(); // أول إرسال — الـhash فاضي فينبعث تلقائياً
     // بدء إرسال الحالة كل 500ms (يُرسل فعلياً فقط عند تغيّر الحالة، بفضل مقارنة الـhash)
     awSyncInterval = setInterval(awSendState, 500);
@@ -11268,10 +11282,11 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       if (display) {
         display.textContent = '🎡 العجلة تدور لدى المقدم...';
         display.style.opacity = '0.85';
+        display.style.animation = 'awPulse 1s infinite';
       }
 
       setTimeout(() => {
-        if (display) { display.textContent = `الفئة: ${catName}`; display.style.opacity = '1'; }
+        if (display) { display.textContent = `الفئة: ${catName}`; display.style.opacity = '1'; display.style.animation = 'none'; }
       }, 5000);
     } catch(e) { console.warn('[AW viewer] خطأ بعرض حالة العجلة', e); }
   }
@@ -11291,10 +11306,10 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       _awProtectModalUntil = Date.now() + 4300; // 4 ثوانٍ + هامش أمان
 
       const status = document.getElementById('flashStatus');
-      if (status) status.textContent = '⚡ الوميض يعمل لدى المقدم...';
+      if (status) { status.textContent = '⚡ الوميض يعمل لدى المقدم...'; status.style.animation = 'awPulse 1s infinite'; }
 
       setTimeout(() => {
-        if (status) status.textContent = `✨ الفئة المختارة: ${winnerName}`;
+        if (status) { status.textContent = `✨ الفئة المختارة: ${winnerName}`; status.style.animation = 'none'; }
       }, 4000);
     } catch(e) { console.warn('[AW viewer] خطأ بعرض حالة الوميض', e); }
   }
@@ -11314,6 +11329,9 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
             if (nr) nr.value = state.teams.red;
           }
           if (typeof startGame === 'function') {
+            // إخفاء شاشة الإعدادات فوراً بدون حركة (المشاهد ما يحتاج يشوفها إطلاقاً)
+            const settingsEl = document.getElementById('settings');
+            if (settingsEl) settingsEl.style.display = 'none';
             startGame();
             _awGameStarted = true;
             // انتظر جاهزية الخريطة فعلياً بدل تأخير ثابت
