@@ -2633,6 +2633,7 @@
         }
 
     </style>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
 </head>
 <body>
     <!-- Landscape orientation hint -->
@@ -10833,6 +10834,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   <div class="aw-live-dot"></div>
   <div class="aw-viewer-badge">مشاهد مباشر</div>
   <div id="awHostCode" style="font-size:12px;color:rgba(255,255,255,0.4)"></div>
+  <button id="awViewerMicBtn" onclick="awToggleMic()" title="اضغط للانضمام للصوت" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:14px;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center">🎤</button>
   <button onclick="awLeaveRoom()" style="margin-right:auto;background:rgba(220,60,60,0.25);border:1px solid rgba(220,60,60,0.5);color:#ff8a8a;font-family:'Tajawal',sans-serif;font-size:12px;font-weight:700;padding:5px 14px;border-radius:6px;cursor:pointer">🚪 خروج</button>
 </div>
 
@@ -10841,10 +10843,19 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   <div class="aw-live-dot"></div>
   <div class="aw-viewer-badge">🔴 بث مباشر</div>
   <div id="awHostBarCode" style="font-size:13px;color:#c8a84b;font-weight:700;cursor:pointer" onclick="awCopyCode()" title="انقر للنسخ"></div>
+  <button id="awHostMicBtn" onclick="awToggleMic()" title="اضغط للانضمام للصوت" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:14px;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center">🎤</button>
   <button onclick="awLeaveRoom()" style="background:rgba(220,60,60,0.25);border:1px solid rgba(220,60,60,0.5);color:#ff8a8a;font-family:'Tajawal',sans-serif;font-size:12px;font-weight:700;padding:5px 14px;border-radius:6px;cursor:pointer">🚪 إنهاء البث</button>
 </div>
 
+<style>
+  #awHostMicBtn.aw-voice-active, #awViewerMicBtn.aw-voice-active {
+    background: rgba(35,165,90,0.35) !important;
+    border-color: rgba(35,165,90,0.7) !important;
+  }
+</style>
+
 <script>
+
 (function() {
   'use strict';
 
@@ -11056,11 +11067,90 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   }
 
   // ════ الخروج من البث (مقدم أو مشاهد) — تنظيف كامل ثم إعادة تحميل الصفحة لضمان بداية نظيفة ════
+  // ════ الصوت الجماعي (Agora) — نفس الخدمة اللي يستخدمها تطبيق عوالم بالضبط ════
+  const AW_AGORA_APP_ID = '3a810a3ea5a24451ab56a6b7429c929c';
+  const AW_AGORA_TOKEN_URL = 'https://agora-token-server-production-3636.up.railway.app';
+  let awAgoraClient = null;
+  let awLocalAudioTrack = null;
+  let awVoiceJoined = false;
+  let awVoiceMuted = false;
+
+  async function awGetAgoraToken(channelName, uid) {
+    try {
+      const res = await fetch(`${AW_AGORA_TOKEN_URL}/token?channel=${encodeURIComponent(channelName)}&uid=${uid}`);
+      if (!res.ok) throw new Error('token server error');
+      const data = await res.json();
+      return data.token || null;
+    } catch(e) {
+      console.warn('[AW Voice] فشل الحصول على تصريح الصوت:', e);
+      return null;
+    }
+  }
+
+  function awUpdateMicBtn(state) {
+    // state: 'off' | 'loading' | 'on' | 'muted'
+    const id = awIsHost ? 'awHostMicBtn' : 'awViewerMicBtn';
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = (state === 'loading');
+    btn.textContent = state === 'loading' ? '⏳' : state === 'muted' ? '🔇' : '🎤';
+    btn.classList.toggle('aw-voice-active', state === 'on');
+    btn.title = state === 'on' ? 'اضغط للكتم' : state === 'muted' ? 'اضغط لإلغاء الكتم' : 'اضغط للانضمام للصوت';
+  }
+
+  async function awJoinVoice() {
+    if (awVoiceJoined || !awRoomCode || typeof AgoraRTC === 'undefined') return;
+    awUpdateMicBtn('loading');
+    try {
+      if (!awAgoraClient) {
+        awAgoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+        awAgoraClient.on('user-published', async (user, mediaType) => {
+          try {
+            await awAgoraClient.subscribe(user, mediaType);
+            if (mediaType === 'audio') user.audioTrack.play();
+          } catch(e) {}
+        });
+      }
+      const channelName = ('awgame_' + awRoomCode).substring(0, 64);
+      const uid = Math.floor(Math.random() * 900000) + 1;
+      const token = await awGetAgoraToken(channelName, uid);
+      if (!token) { alert('تعذّر الاتصال بخدمة الصوت، حاول مرة ثانية بعد شوي'); awUpdateMicBtn('off'); return; }
+
+      awLocalAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({ encoderConfig: 'speech_standard' });
+      await awAgoraClient.join(AW_AGORA_APP_ID, channelName, token, uid);
+      await awAgoraClient.publish([awLocalAudioTrack]);
+
+      awVoiceJoined = true; awVoiceMuted = false;
+      awUpdateMicBtn('on');
+    } catch(e) {
+      console.warn('[AW Voice] خطأ الانضمام للصوت:', e);
+      awUpdateMicBtn('off');
+      if (e.name === 'NotAllowedError') alert('يجب السماح بالوصول للميكروفون لتفعيل الصوت الجماعي');
+    }
+  }
+
+  window.awToggleMic = function() {
+    if (!awVoiceJoined) { awJoinVoice(); return; }
+    awVoiceMuted = !awVoiceMuted;
+    if (awLocalAudioTrack) awLocalAudioTrack.setEnabled(!awVoiceMuted);
+    awUpdateMicBtn(awVoiceMuted ? 'muted' : 'on');
+  };
+
+  async function awLeaveVoice() {
+    if (!awVoiceJoined) return;
+    try {
+      if (awLocalAudioTrack) { awLocalAudioTrack.stop(); awLocalAudioTrack.close(); awLocalAudioTrack = null; }
+      if (awAgoraClient) await awAgoraClient.leave();
+    } catch(e) {}
+    awVoiceJoined = false; awVoiceMuted = false;
+  }
+
   window.awLeaveRoom = function() {
     const msg = awIsHost
       ? 'هل تريد إنهاء البث المباشر؟ سينقطع الاتصال عن كل المشاهدين.'
       : 'هل تريد الخروج من المشاهدة المباشرة؟';
     if (!confirm(msg)) return;
+    awLeaveVoice();
     try {
       if (awIsHost && awRoomRef) {
         // إنهاء البث: حذف الغرفة بالكامل من Firebase وإغلاق كل الاتصالات المباشرة
