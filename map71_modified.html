@@ -10569,8 +10569,15 @@
             window.addEventListener('orientationchange', function() {
                 setTimeout(() => {
                     setVH();
-                    if (typeof loadMap === 'function' && document.getElementById('gameScreen')?.classList.contains('active')) {
+                    // إصلاح: المعرّف الصحيح للحاوية هو "game" وليس "gameScreen" (خطأ قديم كان يمنع إعادة الرسم بصمت)
+                    if (typeof loadMap === 'function' && document.getElementById('game')?.classList.contains('active')) {
+                        const wasZoomed = (typeof zoomed !== 'undefined') ? zoomed : false;
+                        const savedContinent = (typeof currentContinent !== 'undefined') ? currentContinent : null;
                         loadMap();
+                        // إعادة تطبيق القارة المختارة إن كان مكبّراً عليها وقت التدوير
+                        if (wasZoomed && savedContinent && typeof selectContinent === 'function') {
+                            selectContinent(savedContinent);
+                        }
                     }
                 }, 300);
             });
@@ -11061,14 +11068,22 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         Object.values(awPeerConnections).forEach(pc => { try { pc.close(); } catch(e) {} });
         awPeerConnections = {}; awDataChannels = {};
         if (awSyncInterval) clearInterval(awSyncInterval);
+        document.getElementById('awHostBar').style.display = 'none';
       } else if (awIsViewer) {
         // مغادرة المشاهدة: إزالة تسجيلي من قائمة المشاهدين وإغلاق اتصالي المباشر
         if (awMyViewerRef) awMyViewerRef.remove().catch(() => {});
         if (awViewerPC) { try { awViewerPC.close(); } catch(e) {} }
+        document.getElementById('awViewerBar').classList.remove('show');
       }
+      // إزالة قيود وضع المشاهد (تعطيل التفاعل) إن كانت مفعّلة
+      document.body.classList.remove('aw-viewer-mode');
+      awIsHost = false; awIsViewer = false;
+      window.awIsHost = false;
+      awRoomRef = null; awRoomCode = null; window.awRoomCode = null;
     } catch(e) { console.warn('[AW] خطأ أثناء الخروج:', e); }
-    // إعادة تحميل الصفحة تضمن تنظيف كل شي (مستمعين، اتصالات) وبداية نظيفة 100%
-    location.reload();
+    // ملاحظة: عمداً بدون location.reload() — إعادة تحميل الصفحة داخل iframe
+    // تُفعّل شاشة تحميل التطبيق الحاضن (عوالم) اللي فيها مشكلة بزر إغلاقها.
+    // التنظيف أعلاه كافٍ لإيقاف البث فعلياً؛ اللعبة تستمر عادي بدون بث.
   };
 
 
