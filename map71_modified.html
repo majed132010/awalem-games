@@ -10838,13 +10838,108 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     appId: "1:939518942115:web:404307d7b8e0677c335816"
   };
 
-  console.log('%c[AW] BUILD MARKER: v5-occ-cat-sync-' + new Date().toISOString().slice(0,10), 'background:#c8a84b;color:#000;font-weight:bold;padding:2px 6px;');
+  console.log('%c[AW] BUILD MARKER: v6-webrtc-direct-' + new Date().toISOString().slice(0,10), 'background:#c8a84b;color:#000;font-weight:bold;padding:2px 6px;');
   let awApp, awDb, awRoomRef;
   let awIsHost = false;
   let awIsViewer = false;
   let awRoomCode = null;
   let awSyncInterval = null;
   let awLastSyncHash = '';
+
+  // ════ WebRTC: اتصال مباشر بين المقدم والمشاهد لتقليل التأخير قدر الإمكان ════
+  // مهم: Firebase يبقى شغّالاً دائماً كخط رجوع (fallback) — لو فشل الاتصال المباشر لأي سبب
+  // (شبكة، جدار حماية)، البث يستمر عادي عبر Firebase بدون أي انقطاع أو كسر باللعبة.
+  const AW_STUN_SERVERS = { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ] };
+  let awPeerConnections = {}; // (عند المقدم) اتصال منفصل لكل مشاهد
+  let awDataChannels = {};    // (عند المقدم) قناة بيانات منفصلة لكل مشاهد
+  let awViewerPC = null;      // (عند المشاهد) الاتصال بالمقدم
+  let awViewerDC = null;      // (عند المشاهد) قناة الاستقبال من المقدم
+
+  // ---- جهة المقدم: إعداد اتصال مباشر مع مشاهد جديد ----
+  function awHostSetupRTCForViewer(viewerKey) {
+    if (awPeerConnections[viewerKey]) return;
+    try {
+      const pc = new RTCPeerConnection(AW_STUN_SERVERS);
+      awPeerConnections[viewerKey] = pc;
+      const dc = pc.createDataChannel('awState');
+      awDataChannels[viewerKey] = dc;
+      dc.onopen = () => console.log('[AW RTC] ⚡ قناة مباشرة مفتوحة مع مشاهد:', viewerKey);
+      dc.onclose = () => { delete awDataChannels[viewerKey]; };
+
+      const rtcRef = awRoomRef.child('rtc/' + viewerKey);
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) rtcRef.child('hostCandidates').push(e.candidate.toJSON());
+      };
+
+      pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+        rtcRef.child('offer').set({ sdp: pc.localDescription.sdp, type: pc.localDescription.type });
+      }).catch(e => console.warn('[AW RTC] خطأ بإنشاء عرض الاتصال:', e));
+
+      rtcRef.child('answer').on('value', snap => {
+        const ans = snap.val();
+        if (ans && !pc.currentRemoteDescription) {
+          pc.setRemoteDescription(new RTCSessionDescription(ans)).catch(e => console.warn('[AW RTC] خطأ استقبال رد المشاهد:', e));
+        }
+      });
+
+      rtcRef.child('viewerCandidates').on('child_added', snap => {
+        const cand = snap.val();
+        if (cand) pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+      });
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          delete awPeerConnections[viewerKey];
+          delete awDataChannels[viewerKey];
+        }
+      };
+    } catch(e) {
+      console.warn('[AW RTC] تعذر إعداد الاتصال المباشر (البث مستمر عبر الطريقة الاحتياطية):', e);
+    }
+  }
+
+  // ---- جهة المشاهد: الاتصال بالمقدم ----
+  function awViewerSetupRTC(code, viewerKey) {
+    try {
+      const pc = new RTCPeerConnection(AW_STUN_SERVERS);
+      awViewerPC = pc;
+      const rtcRef = awDb.ref('game_rooms/' + code + '/rtc/' + viewerKey);
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) rtcRef.child('viewerCandidates').push(e.candidate.toJSON());
+      };
+
+      pc.ondatachannel = (e) => {
+        awViewerDC = e.channel;
+        awViewerDC.onmessage = (msg) => {
+          try { awApplyState(JSON.parse(msg.data)); } catch(e2) {}
+        };
+        awViewerDC.onopen = () => console.log('[AW RTC] ⚡ اتصال مباشر بالمقدم — زمن استجابة أقل بكثير');
+      };
+
+      rtcRef.child('offer').on('value', snap => {
+        const offer = snap.val();
+        if (offer && !pc.currentRemoteDescription) {
+          pc.setRemoteDescription(new RTCSessionDescription(offer))
+            .then(() => pc.createAnswer())
+            .then(answer => pc.setLocalDescription(answer))
+            .then(() => rtcRef.child('answer').set({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }))
+            .catch(e => console.warn('[AW RTC] خطأ بمعالجة عرض المقدم:', e));
+        }
+      });
+
+      rtcRef.child('hostCandidates').on('child_added', snap => {
+        const cand = snap.val();
+        if (cand) pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+      });
+    } catch(e) {
+      console.warn('[AW RTC] تعذر إعداد الاتصال المباشر (البث مستمر عبر الطريقة الاحتياطية):', e);
+    }
+  }
 
   // تهيئة Firebase — نستخدم نفس الـapp إذا كان موجوداً
   function awInitFirebase() {
@@ -10921,6 +11016,15 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         document.getElementById('awViewersCount').textContent =
           count > 0 ? `👁️ ${count} مشاهد${count > 1 ? 'ون' : ''} منضم${count > 1 ? 'ون' : ''}` : '⏳ لا يوجد مشاهدون بعد...';
       });
+      // كل مشاهد جديد ينضم → نبدأ معه اتصال مباشر (WebRTC) لتقليل التأخير
+      awRoomRef.child('viewers').on('child_added', snap => {
+        awHostSetupRTCForViewer(snap.key);
+      });
+      // عند خروج مشاهد → إغلاق اتصاله المباشر وتنظيف الموارد
+      awRoomRef.child('viewers').on('child_removed', snap => {
+        const pc = awPeerConnections[snap.key];
+        if (pc) { try { pc.close(); } catch(e) {} delete awPeerConnections[snap.key]; delete awDataChannels[snap.key]; }
+      });
       console.log('[AW] Room created:', awRoomCode);
     } catch(e) {
       console.error('[AW] Room creation error:', e);
@@ -10982,6 +11086,8 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       // تسجيل المشاهد — Presence Pattern: كل مشاهد يضيف مفتاحه الخاص، يُحذف تلقائياً عند الانفصال
       const myViewerRef = awRoomRef.child('viewers').push(true);
       myViewerRef.onDisconnect().remove();
+      // بدء الاتصال المباشر بالمقدم (WebRTC) — إن فشل، البث يستمر عادي عبر Firebase تلقائياً
+      awViewerSetupRTC(code, myViewerRef.key);
 
       // انتظر حتى يصل أول state حقيقي من المقدم قبل الدخول
       let enteredGame = false;
@@ -11088,6 +11194,14 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     const newHash = JSON.stringify(stateForHash);
     if (newHash === awLastSyncHash) return;
     awLastSyncHash = newHash;
+    // إرسال فوري عبر أي قناة مباشرة مفتوحة (بدون انتظار Firebase) — أسرع بكثير
+    const payload = JSON.stringify(state);
+    Object.values(awDataChannels).forEach(dc => {
+      if (dc.readyState === 'open') {
+        try { dc.send(payload); } catch(e) {}
+      }
+    });
+    // يبقى الإرسال عبر Firebase دائماً كخط رجوع يضمن الوصول حتى لو تعطّل الاتصال المباشر
     awRoomRef.child('state').set(state).catch(() => {});
   }
 
