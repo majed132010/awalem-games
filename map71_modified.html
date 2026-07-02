@@ -11050,6 +11050,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       hostBar.style.display = 'flex';
       const codeEl = document.getElementById('awHostBarCode');
       if (codeEl) codeEl.textContent = 'كود الانضمام: ' + awRoomCode;
+      awReserveTopBarSpace(hostBar);
     }
     awSendState(); // أول إرسال — الـhash فاضي فينبعث تلقائياً
     // بدء إرسال الحالة كل 500ms (يُرسل فعلياً فقط عند تغيّر الحالة، بفضل مقارنة الـhash)
@@ -11112,11 +11113,11 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
         if (!enteredGame) {
           enteredGame = true;
-          // أول حالة تصل → أدخل للعبة
-          document.getElementById('awGameRoom').classList.add('hidden');
-          document.getElementById('awViewerBar').classList.add('show');
-          document.getElementById('awHostCode').textContent = 'كود: ' + code;
-          document.body.classList.add('aw-viewer-mode');
+          // إخفاء الإعدادات فوراً كإجراء احترازي (حتى قبل أي محاولة عرض)
+          const settingsEl = document.getElementById('settings');
+          if (settingsEl) settingsEl.style.display = 'none';
+          statusEl.textContent = '⏳ جاري تحميل الخريطة...';
+          // ملاحظة: awGameRoom يبقى ظاهراً (شاشة انتظار) لحد ما تجهز الخريطة فعلياً — يصير الإخفاء داخل awApplyState
         }
 
         awApplyState(state);
@@ -11240,6 +11241,22 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let _awFlaggedCountries = new Set();
   let _awAnswerRevealedOnce = false;
 
+  // نحجز مساحة أعلى الخريطة تلقائياً بحساب ارتفاع الشريط الفعلي (بدل رقم ثابت مخمّن)
+  // كي لا تختفي أطراف القارة تحت شريط الكود العلوي
+  function awReserveTopBarSpace(barEl) {
+    if (!barEl) return;
+    const applyOffset = () => {
+      const h = barEl.getBoundingClientRect().height;
+      const worldMap = document.getElementById('worldMap');
+      if (worldMap && h > 0) {
+        worldMap.style.top = h + 'px';
+        worldMap.style.height = `calc(100% - ${h}px)`;
+      }
+    };
+    // القياس بعد فريم أو اثنين لضمان أن الشريط أصبح مرئياً بحجمه الكامل قبل القياس
+    requestAnimationFrame(() => { applyOffset(); requestAnimationFrame(applyOffset); });
+  }
+
   // ننتظر جاهزية الخريطة فعلياً: وجود مسارات الدول + تهيئة متغيّر projection
   // (وجود SVG وحده لا يكفي لأن selectContinent يعتمد على projection المُهيّأ داخل loadMap بشكل غير متزامن)
   function awWaitForMap(callback) {
@@ -11334,8 +11351,18 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
             if (settingsEl) settingsEl.style.display = 'none';
             startGame();
             _awGameStarted = true;
-            // انتظر جاهزية الخريطة فعلياً بدل تأخير ثابت
-            awWaitForMap(() => { _awMapReady = true; });
+            // ننتظر جاهزية الخريطة فعلياً، وبعدها بس نظهر اللعبة للمشاهد (يبقى بشاشة الانتظار لحد كذا)
+            awWaitForMap(() => {
+              _awMapReady = true;
+              document.getElementById('awGameRoom').classList.add('hidden');
+              const vb = document.getElementById('awViewerBar');
+              if (vb) {
+                vb.classList.add('show');
+                document.getElementById('awHostCode').textContent = 'كود: ' + awRoomCode;
+                awReserveTopBarSpace(vb);
+              }
+              document.body.classList.add('aw-viewer-mode');
+            });
           }
           return;
         }
