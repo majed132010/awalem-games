@@ -1366,8 +1366,8 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
   try {
     cnApp = firebase.initializeApp(CN_FB_CONFIG, 'cn-game');
     cnDb = cnApp.database();
-    console.log('[CN] Firebase ready ✅');
-  } catch(e) { console.error('[CN] Firebase init error:', e); }
+    console.log('[CN] Firebase ready ✅ — رابط قاعدة البيانات الفعلي:', cnDb.ref().toString());
+  } catch(e) { console.error('[CN] Firebase init error:', e.code, e.message, e); }
 
   function cnGenCode() { return String(Math.floor(100000 + Math.random()*900000)); }
 
@@ -1402,7 +1402,9 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
       window.cnRoomCode = cnRoomCode;
       document.getElementById('cnCodeDisplay').textContent = cnRoomCode;
       cnRoomRef = cnDb.ref('game_rooms/' + cnRoomCode);
+      console.log('[CN] محاولة الكتابة على:', cnRoomRef.toString());
       await cnRoomRef.set({ host: true, game: 'codenames', state: null, ts: Date.now() });
+      console.log('[CN] نجحت الكتابة ✅');
       cnRoomRef.onDisconnect().remove();
       cnRoomRef.child('viewers').on('value', snap => {
         const count = snap.numChildren();
@@ -1415,8 +1417,8 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
         if (pc) { try { pc.close(); } catch(e) {} delete cnPeerConnections[snap.key]; delete cnDataChannels[snap.key]; }
       });
     } catch(e) {
-      console.error('[CN] خطأ إنشاء الغرفة:', e);
-      document.getElementById('cnViewersCount').textContent = '⚠️ خطأ: ' + (e.message || '');
+      console.error('[CN] خطأ إنشاء الغرفة — الرمز:', e.code, '— الرسالة:', e.message, '— كامل:', e);
+      document.getElementById('cnViewersCount').textContent = '⚠️ خطأ: ' + (e.code || e.message || '');
     }
   }
 
