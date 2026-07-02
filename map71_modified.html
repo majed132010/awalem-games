@@ -11060,6 +11060,11 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         if (window._awPendingWheelEvent) state.wheelEvt = window._awPendingWheelEvent;
         if (window._awPendingFlashEvent) state.flashEvt = window._awPendingFlashEvent;
 
+        // نافذة "حلها واحتلّها" — لقطة كاملة (بدون حركة CSS مستمرة، فتُرسل بأمان)
+        const conqEl = document.getElementById('conquerModal');
+        state.conqActive = !!conqEl?.classList.contains('active');
+        if (state.conqActive) state.conqHtml = conqEl.innerHTML.slice(0, 20000);
+
         // قائمة الدول المحتلة (اللون + الفريق) — كي يلوّن المشاهد نفس الدول على خريطته
         try {
           const occNodes = document.querySelectorAll('.country.occupied-blue, .country.occupied-red');
@@ -11104,6 +11109,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let _awMapReady = false;
   let _awLastWheelEvtId = 0;
   let _awLastFlashEvtId = 0;
+  let _awFlaggedCountries = new Set();
 
   // ننتظر جاهزية الخريطة فعلياً: وجود مسارات الدول + تهيئة متغيّر projection
   // (وجود SVG وحده لا يكفي لأن selectContinent يعتمد على projection المُهيّأ داخل loadMap بشكل غير متزامن)
@@ -11126,6 +11132,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   }
 
   // ════ تشغيل حركة العجلة محلياً عند المشاهد (بدل استقبال صور متتالية) ════
+  let _awProtectModalUntil = 0; // حماية: لا نغلق نافذة الفئة قبل انتهاء الحركة المحلية حتى لو وصلت حالة "مغلقة" من المقدم
   function awReplicateWheelSpin(rot, catName) {
     try {
       const catEl = document.getElementById('categoryModal');
@@ -11137,6 +11144,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       if (wheelContent) wheelContent.style.display = '';
       if (flashContent) flashContent.style.display = 'none';
       if (manualContent) manualContent.style.display = 'none';
+      _awProtectModalUntil = Date.now() + 6800; // 5 ثوانٍ دوران + هامش أمان
 
       if (typeof buildFortuneWheel === 'function') buildFortuneWheel();
       const wheel = document.getElementById('fortuneWheel');
@@ -11166,6 +11174,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       if (wheelContent) wheelContent.style.display = 'none';
       if (flashContent) flashContent.style.display = '';
       if (manualContent) manualContent.style.display = 'none';
+      _awProtectModalUntil = Date.now() + 4800; // 4 ثوانٍ وميض + هامش أمان
 
       const cats = (typeof getActualCategories === 'function') ? getActualCategories() : [];
       const grid = document.getElementById('flashGrid');
@@ -11261,18 +11270,6 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           nEl.innerHTML = state.ph; nEl.classList.add('active');
         }
 
-        // تطبيق نافذة الفئة/العجلة — الفتح/الإغلاق يعتمد على catActive فقط
-        // (تحديث المحتوى منفصل: لا يصير أثناء الدوران الفعلي كي لا يكسر حركة الانتقال المحلية)
-        const catEl = document.getElementById('categoryModal');
-        if (catEl) {
-          if (state.catActive) {
-            catEl.classList.add('active');
-            if (state.catHtml) catEl.innerHTML = state.catHtml;
-          } else {
-            catEl.classList.remove('active');
-          }
-        }
-
         // تشغيل حركة العجلة محلياً عند وصول حدث دوران جديد من المقدم
         if (state.wheelEvt && state.wheelEvt.id > _awLastWheelEvtId) {
           _awLastWheelEvtId = state.wheelEvt.id;
@@ -11284,15 +11281,53 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
           awReplicateFlashSpin(state.flashEvt.winner);
         }
 
-        // تلوين الدول المحتلة على خريطة المشاهد لتطابق خريطة المقدم
+        // تطبيق نافذة الفئة/العجلة — الفتح/الإغلاق يعتمد على catActive
+        // لكن لا نغلقها أبداً قبل انتهاء حركة العجلة/الوميض المحلية (حماية من القطع المفاجئ)
+        const catEl = document.getElementById('categoryModal');
+        if (catEl) {
+          if (state.catActive) {
+            catEl.classList.add('active');
+            if (state.catHtml) catEl.innerHTML = state.catHtml;
+          } else if (Date.now() >= _awProtectModalUntil) {
+            catEl.classList.remove('active');
+          }
+        }
+
+        // تطبيق نافذة "حلها واحتلّها" — لقطة كاملة (بدون حركة CSS مستمرة، فلا مشكلة بالمزامنة)
+        const conqEl = document.getElementById('conquerModal');
+        if (conqEl) {
+          if (state.conqActive) {
+            conqEl.classList.add('active');
+            if (state.conqHtml) conqEl.innerHTML = state.conqHtml;
+          } else {
+            conqEl.classList.remove('active');
+          }
+        }
+
+        // تلوين الدول المحتلة + وضع نفس العلم والجمجمة كما عند المقدم بالضبط
         try {
           const svg = document.querySelector('#worldMap svg');
           if (svg && Array.isArray(state.occ)) {
-            svg.querySelectorAll('.country.occupied-blue, .country.occupied-red')
-              .forEach(el => el.classList.remove('occupied-blue', 'occupied-red'));
+            const currentNames = new Set(state.occ.map(i => i.n));
+            // إزالة أي علم لدولة لم تعد ضمن قائمة المحتلين (احتياطي نادر الحدوث)
+            Array.from(_awFlaggedCountries).forEach(n => {
+              if (!currentNames.has(n)) {
+                if (typeof removeFlag === 'function') removeFlag('c_' + n);
+                _awFlaggedCountries.delete(n);
+              }
+            });
             state.occ.forEach(item => {
               const path = svg.querySelector(`.country[data-eng="${CSS.escape(item.n)}"]`);
-              if (path) path.classList.add(item.t === 'b' ? 'occupied-blue' : 'occupied-red');
+              if (!path) return;
+              const teamWord = item.t === 'b' ? 'blue' : 'red';
+              path.classList.remove('occupied-blue', 'occupied-red');
+              path.classList.add('occupied-' + teamWord);
+              // العلم والجمجمة تُوضع مرة وحدة بس (تجنّب إعادة الإنشاء كل 500ms)
+              if (!_awFlaggedCountries.has(item.n)) {
+                _awFlaggedCountries.add(item.n);
+                if (typeof placeTeamFlag === 'function') placeTeamFlag(path, teamWord);
+                if (typeof placeSkullIcon === 'function') placeSkullIcon(path, teamWord);
+              }
             });
           }
         } catch(e3) { /* تجاهل أي خطأ في التلوين حتى لا يوقف باقي المزامنة */ }
