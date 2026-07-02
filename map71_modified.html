@@ -11078,11 +11078,14 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   async function awGetAgoraToken(channelName, uid) {
     try {
       const res = await fetch(`${AW_AGORA_TOKEN_URL}/token?channel=${encodeURIComponent(channelName)}&uid=${uid}`);
-      if (!res.ok) throw new Error('token server error');
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        throw new Error(`رمز الحالة: ${res.status} — ${bodyText.slice(0,200)}`);
+      }
       const data = await res.json();
       return data.token || null;
     } catch(e) {
-      console.warn('[AW Voice] فشل الحصول على تصريح الصوت:', e);
+      console.error('[AW Voice] فشل الحصول على تصريح الصوت — السبب:', e.message, e);
       return null;
     }
   }
@@ -11099,7 +11102,13 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   }
 
   async function awJoinVoice() {
-    if (awVoiceJoined || !awRoomCode || typeof AgoraRTC === 'undefined') return;
+    if (awVoiceJoined) return;
+    if (typeof AgoraRTC === 'undefined') {
+      console.error('[AW Voice] مكتبة Agora ما تحمّلت — تحقق من الاتصال بالإنترنت أو حظر الإعلانات');
+      alert('تعذّر تحميل مكتبة الصوت. جرّب تعطيل أي مانع إعلانات وأعد المحاولة.');
+      return;
+    }
+    if (!awRoomCode) return;
     awUpdateMicBtn('loading');
     try {
       if (!awAgoraClient) {
@@ -11114,7 +11123,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       const channelName = ('awgame_' + awRoomCode).substring(0, 64);
       const uid = Math.floor(Math.random() * 900000) + 1;
       const token = await awGetAgoraToken(channelName, uid);
-      if (!token) { alert('تعذّر الاتصال بخدمة الصوت، حاول مرة ثانية بعد شوي'); awUpdateMicBtn('off'); return; }
+      if (!token) { alert('تعذّر الاتصال بخدمة الصوت (تحقق من الـConsole لمزيد من التفاصيل)'); awUpdateMicBtn('off'); return; }
 
       awLocalAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({ encoderConfig: 'speech_standard' });
       await awAgoraClient.join(AW_AGORA_APP_ID, channelName, token, uid);
@@ -11123,7 +11132,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       awVoiceJoined = true; awVoiceMuted = false;
       awUpdateMicBtn('on');
     } catch(e) {
-      console.warn('[AW Voice] خطأ الانضمام للصوت:', e);
+      console.error('[AW Voice] خطأ الانضمام للصوت:', e.name, e.message, e);
       awUpdateMicBtn('off');
       if (e.name === 'NotAllowedError') alert('يجب السماح بالوصول للميكروفون لتفعيل الصوت الجماعي');
     }
