@@ -1269,7 +1269,7 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
     try {
       const pc = new RTCPeerConnection(CN_STUN_SERVERS);
       cnViewerPC = pc;
-      const rtcRef = cnDb.ref('cn_rooms/' + code + '/rtc/' + viewerKey);
+      const rtcRef = cnDb.ref('game_rooms/cn_' + code + '/rtc/' + viewerKey);
       pc.onicecandidate = (e) => { if (e.candidate) rtcRef.child('viewerCandidates').push(e.candidate.toJSON()); };
       pc.ondatachannel = (e) => {
         cnViewerDC = e.channel;
@@ -1401,7 +1401,7 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
       cnRoomCode = cnGenCode();
       window.cnRoomCode = cnRoomCode;
       document.getElementById('cnCodeDisplay').textContent = cnRoomCode;
-      cnRoomRef = cnDb.ref('cn_rooms/' + cnRoomCode);
+      cnRoomRef = cnDb.ref('game_rooms/cn_' + cnRoomCode);
       await cnRoomRef.set({ host: true, state: null, ts: Date.now() });
       cnRoomRef.onDisconnect().remove();
       cnRoomRef.child('viewers').on('value', snap => {
@@ -1442,11 +1442,11 @@ body.cn-viewer-mode #cnViewerBar, body.cn-viewer-mode #cnViewerBar * { pointer-e
     if (!cnDb) { statusEl.textContent = '⚠️ Firebase غير متاح'; statusEl.className = 'cn-status error'; return; }
     statusEl.textContent = '⏳ جاري البحث عن الغرفة...'; statusEl.className = 'cn-status';
     try {
-      const snap = await cnDb.ref('cn_rooms/' + code).once('value');
+      const snap = await cnDb.ref('game_rooms/cn_' + code).once('value');
       if (!snap.exists()) { statusEl.textContent = '❌ الكود غير صحيح أو الغرفة غير موجودة'; statusEl.className = 'cn-status error'; return; }
 
       cnRoomCode = code; window.cnRoomCode = code;
-      cnRoomRef = cnDb.ref('cn_rooms/' + code);
+      cnRoomRef = cnDb.ref('game_rooms/cn_' + code);
       cnIsViewer = true;
       document.body.classList.add('cn-viewer-mode');
 
