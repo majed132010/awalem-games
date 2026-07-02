@@ -11287,6 +11287,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
   // ════ تطبيق الحالة عند المشاهد ════
   let _awLastContinent = null;
+  let _awLastContinentSwitchTs = 0;
   let _awGameStarted = false;
   let _awMapReady = false;
   let _awLastWheelEvtId = 0;
@@ -11460,16 +11461,31 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         // انتظر جاهزية الخريطة قبل تطبيق القارة
         if (!_awMapReady) return;
 
-        // مزامنة القارة — استدعاء selectContinent مباشرة بدون timeout
+        // مزامنة القارة — استدعاء selectContinent مباشرة، مع حماية ضد الاستدعاء المكرر
+        // (نتحقق من currentContinent الفعلي بكود اللعبة، مو بس متغير تتبع محلي، تجنباً لأي عدم تطابق)
         if (state.zoomed && state.continent) {
-          if (state.continent !== _awLastContinent) {
+          const actualCurrent = (typeof currentContinent !== 'undefined') ? currentContinent : null;
+          if (state.continent !== _awLastContinent && state.continent !== actualCurrent) {
             _awLastContinent = state.continent;
+            _awLastContinentSwitchTs = Date.now();
             if (typeof selectContinent === 'function') selectContinent(state.continent);
+          } else {
+            _awLastContinent = state.continent; // مزامنة المتغيرين حتى لو ما استدعينا الدالة
           }
         } else if (!state.zoomed && _awLastContinent) {
           _awLastContinent = null;
           if (typeof showContinents === 'function') showContinents();
         }
+
+        // حارس أمان: تأكد إن الخريطة ما تعلق شفافة (٠) بسبب تعارض حركات انتقال متلاحقة
+        try {
+          if (typeof mapG !== 'undefined' && mapG && typeof zoomed !== 'undefined' && zoomed) {
+            const curOpacity = mapG.style('opacity');
+            if ((curOpacity === '0' || curOpacity === 0) && Date.now() - _awLastContinentSwitchTs > 500) {
+              mapG.transition().duration(150).style('opacity', 1);
+            }
+          }
+        } catch(eOpacity) {}
 
         // تطبيق الشاشة النشطة — السؤال والمربعات
         const qEl = document.getElementById('questionScreen');
