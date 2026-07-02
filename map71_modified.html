@@ -728,7 +728,7 @@
         }
         #worldMap { width: 100%; height: 100%; cursor: grab; position: absolute; inset: 0; z-index: 0; will-change: transform; transform: translateZ(0); }
         #worldMap:active { cursor: grabbing; }
-        #worldMap svg { width: 100%; height: 100%; will-change: opacity; transform: translateZ(0); }
+        #worldMap svg { will-change: opacity; transform: translateZ(0); }
         #worldMap svg path { 
             shape-rendering: geometricPrecision; 
             vector-effect: non-scaling-stroke;
@@ -11244,14 +11244,12 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
   // ════ تطبيق الحالة عند المشاهد ════
   let _awLastContinent = null;
-  let _awLastContinentSwitchTs = 0;
   let _awGameStarted = false;
   let _awMapReady = false;
   let _awLastWheelEvtId = 0;
   let _awLastFlashEvtId = 0;
   let _awLastSoundEvtId = 0;
   let _awFlaggedCountries = new Set();
-  let _awAnswerRevealedOnce = false;
 
   // نحجز مساحة أعلى الخريطة تلقائياً بحساب ارتفاع الشريط الفعلي (بدل رقم ثابت مخمّن)
   // كي لا تختفي أطراف القارة تحت شريط الكود العلوي
@@ -11291,7 +11289,6 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
   // ════ تشغيل حركة العجلة محلياً عند المشاهد (بدل استقبال صور متتالية) ════
   let _awProtectModalUntil = 0; // حماية: لا نغلق نافذة الفئة قبل انتهاء الحركة المحلية حتى لو وصلت حالة "مغلقة" من المقدم
-  // ════ بدل محاولة نسخ حركة العجلة بالضبط (تسبب مشاكل توقيت) — نعرض مؤشر ثابت "تدور..." لحد ما تتوقف عند المقدم ════
   function awReplicateWheelSpin(rot, catName) {
     try {
       const catEl = document.getElementById('categoryModal');
@@ -11303,24 +11300,25 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       if (wheelContent) wheelContent.style.display = '';
       if (flashContent) flashContent.style.display = 'none';
       if (manualContent) manualContent.style.display = 'none';
-      _awProtectModalUntil = Date.now() + 5300; // 5 ثوانٍ + هامش أمان
+      _awProtectModalUntil = Date.now() + 6800; // 5 ثوانٍ دوران + هامش أمان
 
-      // نعرض شكل العجلة ثابتاً (بدون تدوير) — تجنّباً لمشاكل توقيت الحركة بين الجهازين
       if (typeof buildFortuneWheel === 'function') buildFortuneWheel();
+      const wheel = document.getElementById('fortuneWheel');
       const display = document.getElementById('selectedCategoryDisplay');
-      if (display) {
-        display.textContent = '🎡 العجلة تدور لدى المقدم...';
-        display.style.opacity = '0.85';
-        display.style.animation = 'awPulse 1s infinite';
-      }
+      if (!wheel) return;
+      if (display) display.textContent = '';
+
+      // إجبار المتصفح يرسم الوضع الحالي أول، كي تشتغل حركة الانتقال (transition) بشكل صحيح
+      void wheel.offsetWidth;
+      wheel.style.transform = `rotate(${rot}deg)`;
 
       setTimeout(() => {
-        if (display) { display.textContent = `الفئة: ${catName}`; display.style.opacity = '1'; display.style.animation = 'none'; }
+        if (display) display.textContent = `الفئة: ${catName}`;
       }, 5000);
-    } catch(e) { console.warn('[AW viewer] خطأ بعرض حالة العجلة', e); }
+    } catch(e) { console.warn('[AW viewer] خطأ بتشغيل حركة العجلة', e); }
   }
 
-  // ════ نفس الفكرة للوميض: مؤشر ثابت بدل محاولة نسخ حركة الكروت بالضبط ════
+  // ════ تشغيل حركة الوميض محلياً عند المشاهد، تنتهي على نفس الفئة الفائزة عند المقدم ════
   function awReplicateFlashSpin(winnerName) {
     try {
       const catEl = document.getElementById('categoryModal');
@@ -11332,15 +11330,52 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
       if (wheelContent) wheelContent.style.display = 'none';
       if (flashContent) flashContent.style.display = '';
       if (manualContent) manualContent.style.display = 'none';
-      _awProtectModalUntil = Date.now() + 4300; // 4 ثوانٍ + هامش أمان
+      _awProtectModalUntil = Date.now() + 4800; // 4 ثوانٍ وميض + هامش أمان
 
+      const cats = (typeof getActualCategories === 'function') ? getActualCategories() : [];
+      const grid = document.getElementById('flashGrid');
       const status = document.getElementById('flashStatus');
-      if (status) { status.textContent = '⚡ الوميض يعمل لدى المقدم...'; status.style.animation = 'awPulse 1s infinite'; }
+      if (!grid) return;
+      grid.innerHTML = '';
+      if (status) status.textContent = '⚡ الوميض يبدأ الآن...';
+      cats.forEach(cat => {
+        const card = document.createElement('div');
+        card.className = 'flash-card';
+        card.style.background = `linear-gradient(135deg, ${cat.color}, ${cat.color}cc)`;
+        card.style.setProperty('--flash-color', cat.color);
+        card.innerHTML = `<span class="flash-icon">${cat.icon}</span><span class="flash-label">${cat.name}</span>`;
+        grid.appendChild(card);
+      });
 
-      setTimeout(() => {
-        if (status) { status.textContent = `✨ الفئة المختارة: ${winnerName}`; status.style.animation = 'none'; }
-      }, 4000);
-    } catch(e) { console.warn('[AW viewer] خطأ بعرض حالة الوميض', e); }
+      const cards = Array.from(grid.querySelectorAll('.flash-card'));
+      const winnerIdx = cats.findIndex(c => c.name === winnerName);
+      let elapsed = 0;
+      const totalDuration = 4000;
+      const baseInterval = 80;
+
+      function step() {
+        const progress = elapsed / totalDuration;
+        const interval = baseInterval + (progress * progress * 420);
+        cards.forEach(c => c.classList.remove('flash-active'));
+        let idx = Math.floor(Math.random() * cards.length);
+        if (progress > 0.75 && winnerIdx >= 0 && Math.random() < (progress - 0.75) / 0.25 * 0.7) {
+          idx = winnerIdx;
+        }
+        if (cards[idx]) cards[idx].classList.add('flash-active');
+        elapsed += interval;
+        if (elapsed < totalDuration) {
+          setTimeout(step, interval);
+        } else {
+          cards.forEach(c => c.classList.remove('flash-active'));
+          if (winnerIdx >= 0 && cards[winnerIdx]) {
+            cards[winnerIdx].classList.add('flash-winner');
+            setTimeout(() => cards[winnerIdx].classList.remove('flash-winner'), 1800);
+          }
+          if (status) status.textContent = `✨ الفئة المختارة: ${winnerName}`;
+        }
+      }
+      setTimeout(step, baseInterval);
+    } catch(e) { console.warn('[AW viewer] خطأ بتشغيل حركة الوميض', e); }
   }
 
   function awApplyState(state) {
@@ -11382,31 +11417,16 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         // انتظر جاهزية الخريطة قبل تطبيق القارة
         if (!_awMapReady) return;
 
-        // مزامنة القارة — استدعاء selectContinent مباشرة، مع حماية ضد الاستدعاء المكرر
-        // (نتحقق من currentContinent الفعلي بكود اللعبة، مو بس متغير تتبع محلي، تجنباً لأي عدم تطابق)
+        // مزامنة القارة — استدعاء selectContinent مباشرة بدون timeout
         if (state.zoomed && state.continent) {
-          const actualCurrent = (typeof currentContinent !== 'undefined') ? currentContinent : null;
-          if (state.continent !== _awLastContinent && state.continent !== actualCurrent) {
+          if (state.continent !== _awLastContinent) {
             _awLastContinent = state.continent;
-            _awLastContinentSwitchTs = Date.now();
             if (typeof selectContinent === 'function') selectContinent(state.continent);
-          } else {
-            _awLastContinent = state.continent; // مزامنة المتغيرين حتى لو ما استدعينا الدالة
           }
         } else if (!state.zoomed && _awLastContinent) {
           _awLastContinent = null;
           if (typeof showContinents === 'function') showContinents();
         }
-
-        // حارس أمان: تأكد إن الخريطة ما تعلق شفافة (٠) بسبب تعارض حركات انتقال متلاحقة
-        try {
-          if (typeof mapG !== 'undefined' && mapG && typeof zoomed !== 'undefined' && zoomed) {
-            const curOpacity = mapG.style('opacity');
-            if ((curOpacity === '0' || curOpacity === 0) && Date.now() - _awLastContinentSwitchTs > 500) {
-              mapG.transition().duration(150).style('opacity', 1);
-            }
-          }
-        } catch(eOpacity) {}
 
         // تطبيق الشاشة النشطة — السؤال والمربعات
         const qEl = document.getElementById('questionScreen');
@@ -11414,19 +11434,9 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
         [qEl, nEl].forEach(el => el?.classList.remove('active'));
 
         if (state.panel === 'q' && state.ph && qEl) {
-          const wasRevealedBefore = _awAnswerRevealedOnce;
           qEl.innerHTML = state.ph; qEl.classList.add('active');
-          // منع تكرار حركة "ظهور الإجابة" (شلال) عند كل تحديث لاحق (زي عداد الوقت)
-          const revealEl = document.getElementById('qsAnswerReveal');
-          if (revealEl && revealEl.classList.contains('show')) {
-            if (wasRevealedBefore) revealEl.style.animation = 'none';
-            else _awAnswerRevealedOnce = true;
-          } else {
-            _awAnswerRevealedOnce = false;
-          }
         } else if (state.panel === 'n' && state.ph && nEl) {
           nEl.innerHTML = state.ph; nEl.classList.add('active');
-          _awAnswerRevealedOnce = false; // شاشة جديدة — إعادة ضبط
         }
 
         // تشغيل حركة العجلة محلياً عند وصول حدث دوران جديد من المقدم
