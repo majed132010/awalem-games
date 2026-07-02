@@ -728,7 +728,7 @@
         }
         #worldMap { width: 100%; height: 100%; cursor: grab; position: absolute; inset: 0; z-index: 0; will-change: transform; transform: translateZ(0); }
         #worldMap:active { cursor: grabbing; }
-        #worldMap svg { will-change: opacity; transform: translateZ(0); }
+        #worldMap svg { width: 100%; height: 100%; will-change: opacity; transform: translateZ(0); }
         #worldMap svg path { 
             shape-rendering: geometricPrecision; 
             vector-effect: non-scaling-stroke;
@@ -10826,6 +10826,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   <div class="aw-live-dot"></div>
   <div class="aw-viewer-badge">مشاهد مباشر</div>
   <div id="awHostCode" style="font-size:12px;color:rgba(255,255,255,0.4)"></div>
+  <button onclick="awLeaveRoom()" style="margin-right:auto;background:rgba(220,60,60,0.25);border:1px solid rgba(220,60,60,0.5);color:#ff8a8a;font-family:'Tajawal',sans-serif;font-size:12px;font-weight:700;padding:5px 14px;border-radius:6px;cursor:pointer">🚪 خروج</button>
 </div>
 
 <!-- شريط المقدم أثناء اللعبة — يبقى الكود ظاهر دائماً لينضم أي أحد بأي وقت -->
@@ -10833,6 +10834,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   <div class="aw-live-dot"></div>
   <div class="aw-viewer-badge">🔴 بث مباشر</div>
   <div id="awHostBarCode" style="font-size:13px;color:#c8a84b;font-weight:700;cursor:pointer" onclick="awCopyCode()" title="انقر للنسخ"></div>
+  <button onclick="awLeaveRoom()" style="background:rgba(220,60,60,0.25);border:1px solid rgba(220,60,60,0.5);color:#ff8a8a;font-family:'Tajawal',sans-serif;font-size:12px;font-weight:700;padding:5px 14px;border-radius:6px;cursor:pointer">🚪 إنهاء البث</button>
 </div>
 
 <script>
@@ -10855,6 +10857,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
   let awIsHost = false;
   let awIsViewer = false;
   let awRoomCode = null;
+  let awMyViewerRef = null;
   let awSyncInterval = null;
   let awLastSyncHash = '';
 
@@ -11045,6 +11048,30 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
     }
   }
 
+  // ════ الخروج من البث (مقدم أو مشاهد) — تنظيف كامل ثم إعادة تحميل الصفحة لضمان بداية نظيفة ════
+  window.awLeaveRoom = function() {
+    const msg = awIsHost
+      ? 'هل تريد إنهاء البث المباشر؟ سينقطع الاتصال عن كل المشاهدين.'
+      : 'هل تريد الخروج من المشاهدة المباشرة؟';
+    if (!confirm(msg)) return;
+    try {
+      if (awIsHost && awRoomRef) {
+        // إنهاء البث: حذف الغرفة بالكامل من Firebase وإغلاق كل الاتصالات المباشرة
+        awRoomRef.remove().catch(() => {});
+        Object.values(awPeerConnections).forEach(pc => { try { pc.close(); } catch(e) {} });
+        awPeerConnections = {}; awDataChannels = {};
+        if (awSyncInterval) clearInterval(awSyncInterval);
+      } else if (awIsViewer) {
+        // مغادرة المشاهدة: إزالة تسجيلي من قائمة المشاهدين وإغلاق اتصالي المباشر
+        if (awMyViewerRef) awMyViewerRef.remove().catch(() => {});
+        if (awViewerPC) { try { awViewerPC.close(); } catch(e) {} }
+      }
+    } catch(e) { console.warn('[AW] خطأ أثناء الخروج:', e); }
+    // إعادة تحميل الصفحة تضمن تنظيف كل شي (مستمعين، اتصالات) وبداية نظيفة 100%
+    location.reload();
+  };
+
+
   // ════ بدء اللعبة كمقدم ════
   window.awStartAsHost = function() {
     if (!awRoomCode) { awSkipRoom(); return; }
@@ -11108,6 +11135,7 @@ body.aw-viewer-mode #awViewerBar * { pointer-events: auto !important; }
 
       // تسجيل المشاهد — Presence Pattern: كل مشاهد يضيف مفتاحه الخاص، يُحذف تلقائياً عند الانفصال
       const myViewerRef = awRoomRef.child('viewers').push(true);
+      awMyViewerRef = myViewerRef;
       myViewerRef.onDisconnect().remove();
       // بدء الاتصال المباشر بالمقدم (WebRTC) — إن فشل، البث يستمر عادي عبر Firebase تلقائياً
       awViewerSetupRTC(code, myViewerRef.key);
