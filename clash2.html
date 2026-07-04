@@ -607,7 +607,7 @@ const PTS_MAP = {1:10,2:10,3:10,4:10,5:10,6:20,7:20,8:20,9:20,10:20,11:30,12:30,
 const NUM_PALETTE = [['#FF563E','#6D180E'],['#E73232','#5E0D0D'],['#D39A18','#5B3605'],['#FFD342','#8B5A05'],['#23B5F6','#063C5B'],['#34D6A1','#064A37'],['#30D892','#064C34'],['#27D1B8','#064A45'],['#1BA5FF','#063A6F'],['#6A64FF','#21195E'],['#8E5DFF','#2D185D'],['#FF4DA6','#67103A'],['#FF3F9A','#621133'],['#A15BFF','#3A1768'],['#FFD13F','#794B05'],['#FF563E','#6D180E'],['#E73232','#5E0D0D'],['#D39A18','#5B3605'],['#FFD342','#8B5A05'],['#23B5F6','#063C5B']];
 
 let usedNums = {}, catMode = 'wheel', wheelRotation = 0, isSpinning = false;
-let lastWheelId = 0, lastFlashId = 0, flashTimer = null, currentPickNum = null;
+let lastWheelId = 0, lastFlashId = 0, flashTimer = null, currentPickNum = null, isFlashPlaying = false;
 let usedQs = new Set();
 
 // ═══ شاشة المربعات (متزامنة للجميع) ═══
@@ -627,15 +627,10 @@ function openCountryModal(i){
   pendingClaim = i;
   document.getElementById('claimTitle').textContent = '\ud83d\udccd ' + (c.ar||c.name);
   const btns = document.getElementById('claimBtns');
-  let claimBtns = '';
-  if(mode==='team'){
-    claimBtns = `<button class="btn-blue" onclick="doClaim('blue')">\ud83d\udc51 احتلال للأزرق</button><button class="btn-red" onclick="doClaim('red')">\ud83d\udc51 احتلال للأحمر</button>` +
-      (claimed[i]?`<button class="btn-sm" onclick="doClaim(null)">\u21a9\ufe0f إلغاء الاحتلال</button>`:'');
-  } else {
-    claimBtns = Object.entries(players).map(([id,p])=>`<button class="btn-sm" onclick="doClaim('${id}')">\ud83d\udc51 لـ ${esc(p.name)}</button>`).join('') +
-      (claimed[i]?`<button class="btn-sm" onclick="doClaim(null)">\u21a9\ufe0f إلغاء الاحتلال</button>`:'');
-  }
-  btns.innerHTML = `<button class="btn-gold" style="width:100%" onclick="openNumsFor(${i})">\ud83c\udfaf مربعات الأسئلة</button>` + claimBtns;
+  const owner = claimed[i];
+  const ownerLabel = owner==='blue' ? '\ud83d\udd35 محتلة للأزرق' : owner==='red' ? '\ud83d\udd34 محتلة للأحمر' : (owner ? '\ud83d\udc51 محتلة لـ ' + esc((players[owner]||{}).name||'لاعب') : '');
+  btns.innerHTML = `<button class="btn-gold" style="width:100%" onclick="openNumsFor(${i})">\ud83c\udfaf مربعات الأسئلة</button>` +
+    (ownerLabel ? `<div class="sub" style="width:100%;margin-top:8px">${ownerLabel}</div>` : '');
   document.getElementById('claimModal').classList.add('show');
 }
 function closeCountryModal(){
@@ -697,8 +692,8 @@ function renderCatPick(){
   document.getElementById('flashPane').style.display = m==='flash'?'block':'none';
   document.getElementById('manualPane').style.display = m==='manual'?'block':'none';
   document.getElementById('catTitle').textContent = m==='wheel'?'🎡 عجلة الفئات':m==='flash'?'⚡ وميض الفئات':'✋ اختر الفئة';
-  if(m==='wheel') buildWheel();
-  if(m==='flash') buildFlashGrid();
+  if(m==='wheel' && !isSpinning) buildWheel();
+  if(m==='flash' && !isFlashPlaying) buildFlashGrid();
   if(m==='manual') buildManualGrid();
   document.getElementById('spinBtn').style.display = isHost ? 'block' : 'none';
   document.getElementById('flashStartBtn').style.display = isHost ? 'inline-block' : 'none';
@@ -768,6 +763,8 @@ function playFlashAnim(evt){
   const cats = getCats();
   const winnerIndex = cats.findIndex(c=>c.name===evt.winner);
   if(winnerIndex<0) return;
+  isFlashPlaying = true;
+  buildFlashGrid();
   const cards = Array.from(document.querySelectorAll('#flashGrid .flash-card'));
   const status = document.getElementById('flashStatus');
   document.getElementById('flashStartBtn').style.display='none';
@@ -789,7 +786,7 @@ function playFlashAnim(evt){
       cards.forEach(c=>c.classList.remove('flash-active'));
       cards[winnerIndex].classList.add('flash-winner');
       status.textContent = '✨ الفئة المختارة: ' + evt.winner;
-      setTimeout(()=>{ if(isHost) hostSelectCategory(evt.winner); }, 1800);
+      setTimeout(()=>{ isFlashPlaying = false; if(isHost) hostSelectCategory(evt.winner); }, 1800);
     }
   }
   step();
@@ -811,8 +808,9 @@ function hostSelectCategory(cat){
   usedQs.add(cat+'|'+q.q);
   const pts = state.catPick.pts || 10;
   const num = state.catPick.num;
+  const country = (state.country !== undefined && state.country !== null) ? state.country : null;
   roomRef.child('buzz').remove();
-  roomRef.child('state').update({ catPick:null, wheelEvt:null, flashEvt:null, q:{ q:q.q, a:q.a, cat, pts, num } });
+  roomRef.child('state').update({ catPick:null, wheelEvt:null, flashEvt:null, revealed:false, q:{ q:q.q, a:q.a, cat, pts, num, country } });
 }
 
 function doBuzz(){
@@ -834,6 +832,9 @@ async function award(target){
   } else {
     updates['players/'+target+'/score'] = ((players[target]||{}).score||0)+pts;
     if(q.num) updates['usedNums/'+q.num] = 'done';
+  }
+  if(q.country !== undefined && q.country !== null){
+    updates['claimed/'+q.country] = target;
   }
   await roomRef.update(updates);
   toast('✅ +' + pts + ' نقطة');
