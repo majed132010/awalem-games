@@ -124,13 +124,10 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
       <div class="row">
         <span class="sub">الفوز عند:</span>
         <select class="inp" id="targetPoints" style="width:auto;padding:8px 14px">
-          <option value="50">50 نقطة</option>
-          <option value="100" selected>100 نقطة</option>
-          <option value="200">200 نقطة</option>
-          <option value="c5">🗺️ 5 دول</option>
-          <option value="c10">🗺️ 10 دول</option>
-          <option value="c15">🗺️ 15 دول</option>
-          <option value="c20">🗺️ 20 دولة</option>
+          <option value="5">5 دول</option>
+          <option value="10" selected>10 دول</option>
+          <option value="15">15 دولة</option>
+          <option value="20">20 دولة</option>
         </select>
       </div>
       <button class="btn-gold" onclick="createRoom()">🏰 أنشئ غرفة</button>
@@ -210,8 +207,8 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
       </div>
       <div class="section">🏆 من أجاب صحيح؟</div>
       <div class="row" id="awardTeam">
-        <button class="btn-blue" onclick="award('blue')">+10 للأزرق</button>
-        <button class="btn-red" onclick="award('red')">+10 للأحمر</button>
+        <button class="btn-blue" onclick="award('blue')">🔵 للأزرق</button>
+        <button class="btn-red" onclick="award('red')">🔴 للأحمر</button>
       </div>
       <div class="ind-chips" id="awardInd" style="display:none"></div>
     </div>
@@ -332,12 +329,10 @@ async function createRoom(){
   if(!myName) return toast('اكتب اسمك أول');
   localStorage.setItem('cc_name', myName);
   const code = String(Math.floor(100000 + Math.random()*900000));
-  const tv = document.getElementById('targetPoints').value;
-  const winBy = tv.startsWith('c') ? 'countries' : 'points';
-  const target = parseInt(tv.replace('c',''));
+  const target = parseInt(document.getElementById('targetPoints').value) || 10;
   await db.ref('game_rooms/'+code).set({
-    meta: { game:'clash2', hostId:myId, mode, target, winBy, status:'lobby', created:Date.now() },
-    players: { [myId]: { name:myName, team:'blue', score:0, ts:Date.now() } }
+    meta: { game:'clash2', hostId:myId, mode, target, status:'lobby', created:Date.now() },
+    players: { [myId]: { name:myName, team:'blue', ts:Date.now() } }
   });
   enterRoom(code);
 }
@@ -353,7 +348,7 @@ async function joinRoom(){
   const pSnap = await db.ref('game_rooms/'+code+'/players').once('value');
   const count = pSnap.numChildren();
   const team = (count % 2 === 0) ? 'blue' : 'red';
-  await db.ref('game_rooms/'+code+'/players/'+myId).set({ name:myName, team, score:0, ts:Date.now() });
+  await db.ref('game_rooms/'+code+'/players/'+myId).set({ name:myName, team, ts:Date.now() });
   enterRoom(code);
 }
 function enterRoom(code){
@@ -405,23 +400,18 @@ function startGame(){ roomRef.child('meta/status').set('playing'); }
 
 function renderGame(){
   const list = Object.entries(players);
-  let blue = list.filter(([,p])=>p.team==='blue').reduce((a,[,p])=>a+(p.score||0),0);
-  let red = list.filter(([,p])=>p.team==='red').reduce((a,[,p])=>a+(p.score||0),0);
-  let suffix = '';
-  if((meta.winBy||'points')==='countries'){
-    const counts = {};
-    Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
-    blue = counts.blue||0; red = counts.red||0; suffix = ' 🗺️';
-  }
-  document.getElementById('scoreBlue').textContent = '🔵 ' + blue + suffix;
-  document.getElementById('scoreRed').textContent = '🔴 ' + red + suffix;
+  const counts = {};
+  Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
+  const blue = counts.blue||0, red = counts.red||0;
+  document.getElementById('scoreBlue').textContent = '🔵 ' + blue + ' 🗺️';
+  document.getElementById('scoreRed').textContent = '🔴 ' + red + ' 🗺️';
   const teamBar = mode==='team';
   document.getElementById('scoreBlue').style.display = teamBar?'block':'none';
   document.getElementById('scoreRed').style.display = teamBar?'block':'none';
   const ind = document.getElementById('indScores');
   if(mode==='individual'){
     ind.style.display='flex';
-    ind.innerHTML = list.sort((a,b)=>(b[1].score||0)-(a[1].score||0)).map(([id,p],i)=>`<div class="ind-chip" style="${id===myId?'border-color:var(--gold)':''}">#${i+1} ${esc(p.name)} <b style="color:var(--gold)">${p.score||0}</b></div>`).join('');
+    ind.innerHTML = list.map(([id,p])=>[id,p,counts[id]||0]).sort((a,b)=>b[2]-a[2]).map(([id,p,c],i)=>`<div class="ind-chip" style="${id===myId?'border-color:var(--gold)':''}">#${i+1} ${esc(p.name)} <b style="color:var(--gold)">🗺️ ${c}</b></div>`).join('');
   } else ind.style.display='none';
 
   document.getElementById('contLabel').textContent = state.continent ? CONT_AR[state.continent] : 'اختر قارة';
@@ -434,7 +424,7 @@ function renderGame(){
   document.getElementById('qCard').style.display = q ? 'block' : 'none';
   if(q){
     document.getElementById('qCat').textContent = q.cat;
-    document.getElementById('qDiff').textContent = '⭐ ' + (q.pts||10) + ' نقطة';
+    document.getElementById('qDiff').textContent = '👑 سيطرة دولة';
     document.getElementById('qText').textContent = q.q;
     document.getElementById('hostQControls').style.display = isHost ? 'block' : 'none';
     const ab = document.getElementById('answerBox');
@@ -444,7 +434,7 @@ function renderGame(){
     const ai = document.getElementById('awardInd');
     if(mode==='individual'){
       ai.style.display='flex';
-      ai.innerHTML = list.map(([id,p])=>`<div class="ind-chip" style="cursor:pointer" onclick="award('${id}')">+10 لـ ${esc(p.name)}</div>`).join('');
+      ai.innerHTML = list.map(([id,p])=>`<div class="ind-chip" style="cursor:pointer" onclick="award('${id}')">👑 لـ ${esc(p.name)}</div>`).join('');
     } else ai.style.display='none';
   }
   renderBuzz();
@@ -482,31 +472,17 @@ function onStateChange(old){
   }
 }
 function renderWin(){
-  const list = Object.entries(players);
   let name, color;
-  if((meta.winBy||'points')==='countries'){
-    const counts = {};
-    Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
-    if(mode==='team'){
-      const blue = counts.blue||0, red = counts.red||0;
-      name = blue>=red ? 'الفريق الأزرق 🔵' : 'الفريق الأحمر 🔴';
-      color = blue>=red ? 'var(--blue)' : 'var(--red)';
-    } else {
-      const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-      name = sorted[0] && players[sorted[0][0]] ? players[sorted[0][0]].name : '—';
-      color = 'var(--gold)';
-    }
-    const el0 = document.getElementById('winnerName'); el0.textContent = name; el0.style.color = color;
-    return;
-  }
+  const counts = {};
+  Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
   if(mode==='team'){
-    const blue = list.filter(([,p])=>p.team==='blue').reduce((a,[,p])=>a+(p.score||0),0);
-    const red = list.filter(([,p])=>p.team==='red').reduce((a,[,p])=>a+(p.score||0),0);
+    const blue = counts.blue||0, red = counts.red||0;
     name = blue>=red ? 'الفريق الأزرق 🔵' : 'الفريق الأحمر 🔴';
     color = blue>=red ? 'var(--blue)' : 'var(--red)';
   } else {
-    const sorted = list.sort((a,b)=>(b[1].score||0)-(a[1].score||0));
-    name = sorted[0] ? sorted[0][1].name : '—'; color = 'var(--gold)';
+    const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    name = sorted[0] && players[sorted[0][0]] ? players[sorted[0][0]].name : '—';
+    color = 'var(--gold)';
   }
   const el = document.getElementById('winnerName'); el.textContent = name; el.style.color = color;
 }
@@ -617,21 +593,10 @@ function onCountryClickV2(i){
   if(!isHost) return;
   if(state.country !== i){
     roomRef.child('state/country').set(i);
-    setTimeout(()=>openCountryModal(i), 550);
+    setTimeout(()=>openNumsFor(i), 550);
     return;
   }
-  openCountryModal(i);
-}
-function openCountryModal(i){
-  const c = WORLD.countries[i];
-  pendingClaim = i;
-  document.getElementById('claimTitle').textContent = '\ud83d\udccd ' + (c.ar||c.name);
-  const btns = document.getElementById('claimBtns');
-  const owner = claimed[i];
-  const ownerLabel = owner==='blue' ? '\ud83d\udd35 محتلة للأزرق' : owner==='red' ? '\ud83d\udd34 محتلة للأحمر' : (owner ? '\ud83d\udc51 محتلة لـ ' + esc((players[owner]||{}).name||'لاعب') : '');
-  btns.innerHTML = `<button class="btn-gold" style="width:100%" onclick="openNumsFor(${i})">\ud83c\udfaf مربعات الأسئلة</button>` +
-    (ownerLabel ? `<div class="sub" style="width:100%;margin-top:8px">${ownerLabel}</div>` : '');
-  document.getElementById('claimModal').classList.add('show');
+  openNumsFor(i);
 }
 function closeCountryModal(){
   document.getElementById('claimModal').classList.remove('show');
@@ -661,7 +626,7 @@ function renderNumScreen(){
     const [ca,cad] = NUM_PALETTE[i-1];
     cell.style.setProperty('--ca',ca); cell.style.setProperty('--cad',cad);
     const used = usedNums[i];
-    cell.innerHTML = `<span class="nv">${i}</span><span class="np">${PTS_MAP[i]} نقطة</span>`;
+    cell.innerHTML = `<span class="nv">${i}</span><span class="np">🗺️</span>`;
     if(used){ cell.classList.add('used'); cell.dataset.used = used==='blue'?'🔵':used==='red'?'🔴':'✓'; }
     else if(isHost) cell.onclick = () => hostPickNum(i);
     grid.appendChild(cell);
@@ -824,42 +789,23 @@ function nextRound(){
 }
 async function award(target){
   const q = state.q || {};
-  const pts = q.pts || 10;
   const updates = {};
-  if(target==='blue' || target==='red'){
-    Object.entries(players).forEach(([id,p])=>{ if(p.team===target) updates['players/'+id+'/score'] = (p.score||0)+pts; });
-    if(q.num) updates['usedNums/'+q.num] = target;
-  } else {
-    updates['players/'+target+'/score'] = ((players[target]||{}).score||0)+pts;
-    if(q.num) updates['usedNums/'+q.num] = 'done';
+  if(q.num){
+    updates['usedNums/'+q.num] = (target==='blue'||target==='red') ? target : 'done';
   }
   if(q.country !== undefined && q.country !== null){
     updates['claimed/'+q.country] = target;
   }
   await roomRef.update(updates);
-  toast('✅ +' + pts + ' نقطة');
+  toast('👑 تم احتلال الدولة');
   checkWin();
 }
 async function checkWin(){
-  const target = meta.target||100;
-  if((meta.winBy||'points')==='countries'){
-    const cs = (await roomRef.child('claimed').once('value')).val()||{};
-    const counts = {};
-    Object.values(cs).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
-    if(Object.values(counts).some(n=>n>=target)) roomRef.child('meta/status').set('finished');
-    return;
-  }
-  const snap = await roomRef.child('players').once('value');
-  const ps = snap.val()||{};
-  let won = false;
-  if(mode==='team'){
-    const blue = Object.values(ps).filter(p=>p.team==='blue').reduce((a,p)=>a+(p.score||0),0);
-    const red = Object.values(ps).filter(p=>p.team==='red').reduce((a,p)=>a+(p.score||0),0);
-    won = blue>=target || red>=target;
-  } else {
-    won = Object.values(ps).some(p=>(p.score||0)>=target);
-  }
-  if(won) roomRef.child('meta/status').set('finished');
+  const target = meta.target||10;
+  const cs = (await roomRef.child('claimed').once('value')).val()||{};
+  const counts = {};
+  Object.values(cs).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
+  if(Object.values(counts).some(n=>n>=target)) roomRef.child('meta/status').set('finished');
 }
 function endGame(){ if(confirm('إنهاء اللعبة؟')) roomRef.child('meta/status').set('finished'); }
 
