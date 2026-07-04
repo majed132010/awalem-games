@@ -182,7 +182,7 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
   <div id="indScores" class="ind-chips" style="display:none"></div>
   <div class="map-wrap">
     <svg id="mapSvg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet"></svg>
-    <button class="back-world" id="backWorld" style="display:none" onclick="hostSelectContinent(null)">🌐 عرض العالم</button>
+    <button class="back-world" id="backWorld" style="display:none" onclick="hostGoBack()">🌐 عرض العالم</button>
   </div>
   <div class="claim-hint" id="claimHint" style="display:none">👑 كمقدم: اضغط أي دولة لاحتلالها بعد إجابة صحيحة</div>
 
@@ -274,7 +274,7 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
 <!-- ═══ نافذة احتلال دولة ═══ -->
 <div class="modal-bg" id="claimModal">
   <div class="modal" style="max-width:340px;text-align:center">
-    <button class="modal-x" onclick="document.getElementById('claimModal').classList.remove('show')">✕</button>
+    <button class="modal-x" onclick="closeCountryModal()">✕</button>
     <div class="section" style="margin-top:0" id="claimTitle">احتلال دولة</div>
     <div class="row" id="claimBtns"></div>
   </div>
@@ -530,6 +530,17 @@ function paintMap(){
   });
 }
 function updateZoom(){
+  if(state.country !== undefined && state.country !== null && WORLD.countries[state.country]){
+    const path = svg.querySelector(`path[data-i="${state.country}"]`);
+    if(path){
+      try{
+        const bb = path.getBBox();
+        const pad = Math.max(bb.width, bb.height, 4) * 0.5 + 4;
+        svg.setAttribute('viewBox', `${bb.x-pad} ${bb.y-pad} ${bb.width+pad*2} ${bb.height+pad*2}`);
+        return;
+      }catch(e){}
+    }
+  }
   if(state.continent && WORLD.continentBounds[state.continent]){
     const b = WORLD.continentBounds[state.continent];
     const pad = 15;
@@ -568,6 +579,14 @@ function hostSelectContinent(cont){
   if(!isHost) return;
   roomRef.child('state/continent').set(cont);
 }
+function hostGoBack(){
+  if(!isHost) return;
+  if(state.country !== undefined && state.country !== null){
+    roomRef.child('state/country').remove();
+  } else {
+    roomRef.child('state/continent').remove();
+  }
+}
 
 // ═══════════ الفئات (من اللعبة الأصلية) ═══════════
 const CAT_META = {
@@ -596,6 +615,15 @@ function onCountryClickV2(i){
   const c = WORLD.countries[i];
   if(!state.continent){ if(isHost) hostSelectContinent(c.continent); return; }
   if(!isHost) return;
+  if(state.country !== i){
+    roomRef.child('state/country').set(i);
+    setTimeout(()=>openCountryModal(i), 550);
+    return;
+  }
+  openCountryModal(i);
+}
+function openCountryModal(i){
+  const c = WORLD.countries[i];
   pendingClaim = i;
   document.getElementById('claimTitle').textContent = '\ud83d\udccd ' + (c.ar||c.name);
   const btns = document.getElementById('claimBtns');
@@ -609,6 +637,11 @@ function onCountryClickV2(i){
   }
   btns.innerHTML = `<button class="btn-gold" style="width:100%" onclick="openNumsFor(${i})">\ud83c\udfaf مربعات الأسئلة</button>` + claimBtns;
   document.getElementById('claimModal').classList.add('show');
+}
+function closeCountryModal(){
+  document.getElementById('claimModal').classList.remove('show');
+  pendingClaim = null;
+  if(isHost) roomRef.child('state/country').remove();
 }
 function openNumsFor(i){
   const c = WORLD.countries[i];
@@ -789,7 +822,7 @@ function doBuzz(){
 function revealAnswer(){ roomRef.child('state/revealed').set(true); }
 function nextRound(){
   roomRef.child('buzz').remove();
-  roomRef.child('state').update({ q:null, revealed:false });
+  roomRef.child('state').update({ q:null, revealed:false, country:null });
 }
 async function award(target){
   const q = state.q || {};
