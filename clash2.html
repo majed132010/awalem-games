@@ -568,6 +568,24 @@ function onCountryClickV2(i){
   const c = WORLD.countries[i];
   if(!state.continent){ if(isHost) hostSelectContinent(c.continent); return; }
   if(!isHost) return;
+  pendingClaim = i;
+  document.getElementById('claimTitle').textContent = '\ud83d\udccd ' + (c.ar||c.name);
+  const btns = document.getElementById('claimBtns');
+  let claimBtns = '';
+  if(mode==='team'){
+    claimBtns = `<button class="btn-blue" onclick="doClaim('blue')">\ud83d\udc51 احتلال للأزرق</button><button class="btn-red" onclick="doClaim('red')">\ud83d\udc51 احتلال للأحمر</button>` +
+      (claimed[i]?`<button class="btn-sm" onclick="doClaim(null)">\u21a9\ufe0f إلغاء الاحتلال</button>`:'');
+  } else {
+    claimBtns = Object.entries(players).map(([id,p])=>`<button class="btn-sm" onclick="doClaim('${id}')">\ud83d\udc51 لـ ${esc(p.name)}</button>`).join('') +
+      (claimed[i]?`<button class="btn-sm" onclick="doClaim(null)">\u21a9\ufe0f إلغاء الاحتلال</button>`:'');
+  }
+  btns.innerHTML = `<button class="btn-gold" style="width:100%" onclick="openNumsFor(${i})">\ud83c\udfaf مربعات الأسئلة</button>` + claimBtns;
+  document.getElementById('claimModal').classList.add('show');
+}
+function openNumsFor(i){
+  const c = WORLD.countries[i];
+  document.getElementById('claimModal').classList.remove('show');
+  pendingClaim = null;
   roomRef.child('state/numScreen').set({ country:i, name:(c.ar||c.name) });
 }
 function hostCloseNums(){ if(isHost) roomRef.child('state/numScreen').remove(); }
