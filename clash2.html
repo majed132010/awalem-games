@@ -75,6 +75,36 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
 .voice-dot{width:8px;height:8px;border-radius:50%;background:var(--success);display:none}
 .diff-row{display:flex;gap:8px;justify-content:center;margin-bottom:10px}
 .claim-hint{font-size:11px;color:var(--muted);text-align:center;margin-top:4px}
+
+/* ═══ شاشة المربعات ═══ */
+.num-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:6px}
+@media(min-width:600px){.num-grid{grid-template-columns:repeat(5,1fr)}}
+.num-cell{aspect-ratio:1/1.1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;background:linear-gradient(160deg,var(--ca,#F59E0B),var(--cad,#B45309));border:2px solid rgba(255,255,255,0.15);font-weight:900;transition:transform .15s;position:relative;overflow:hidden}
+.num-cell:active{transform:scale(0.95)}
+.num-cell .nv{font-size:24px;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,0.4)}
+.num-cell .np{font-size:10px;color:rgba(255,255,255,0.85);font-weight:700}
+.num-cell.used{opacity:.45;cursor:default;filter:grayscale(0.6)}
+.num-cell.used::after{content:attr(data-used);position:absolute;inset:auto 0 4px;font-size:9px;color:#fff;font-weight:800}
+/* ═══ العجلة ═══ */
+.wheel-wrap{position:relative;width:min(78vw,300px);height:min(78vw,300px);margin:10px auto}
+.wheel-disc{width:100%;height:100%;border-radius:50%;border:5px solid var(--gold);box-shadow:0 0 30px rgba(245,158,11,0.35);transition:transform 5s cubic-bezier(0.15,0.9,0.12,1)}
+.wheel-ptr{position:absolute;top:-14px;right:50%;transform:translateX(50%);font-size:28px;z-index:2;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5))}
+.wheel-spin-btn{position:absolute;top:50%;right:50%;transform:translate(50%,-50%);width:70px;height:70px;border-radius:50%;background:linear-gradient(180deg,#FDE68A,#F59E0B 60%,#B45309);border:3px solid #fff;color:#0B1220;font-family:Tajawal;font-weight:900;font-size:14px;cursor:pointer;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,0.4)}
+.wheel-spin-btn:disabled{opacity:.6}
+.wheel-result{text-align:center;font-weight:900;color:var(--gold);font-size:16px;min-height:24px;margin-top:8px}
+/* ═══ الوميض ═══ */
+.flash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:4px}
+.flash-card{aspect-ratio:1/0.85;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;font-weight:800;color:#fff;text-align:center;padding:4px;opacity:.55;transition:opacity .1s,transform .1s,box-shadow .1s}
+.flash-card .fi{font-size:22px}
+.flash-card.flash-active{opacity:1;transform:scale(1.08);box-shadow:0 0 18px var(--fc,#F59E0B)}
+.flash-card.flash-winner{opacity:1;transform:scale(1.12);box-shadow:0 0 28px var(--fc,#F59E0B);animation:winPulse .5s infinite alternate}
+@keyframes winPulse{to{transform:scale(1.06)}}
+.flash-status{text-align:center;font-weight:900;color:var(--gold);margin-bottom:8px;font-size:14px}
+/* ═══ تبويبات وضع الاختيار ═══ */
+.catmode-tabs{display:flex;gap:6px;margin-bottom:12px}
+.catmode-tab{flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--input-br);background:var(--input);color:var(--muted);text-align:center;cursor:pointer;font-weight:700;font-size:12px}
+.catmode-tab.on{border-color:var(--accent);color:var(--gold);background:rgba(245,158,11,0.1)}
+
 </style>
 </head>
 <body>
@@ -152,14 +182,8 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
   </div>
   <div class="claim-hint" id="claimHint" style="display:none">👑 كمقدم: اضغط أي دولة لاحتلالها بعد إجابة صحيحة</div>
 
-  <div class="card" id="hostPanel" style="display:none">
-    <div class="section" style="margin-top:0">🎯 اختر الصعوبة والفئة</div>
-    <div class="diff-row">
-      <div class="mode-chip on" id="diffE" onclick="setDiff('easy')" style="flex:none;padding:8px 14px">سهل 🟢</div>
-      <div class="mode-chip" id="diffM" onclick="setDiff('medium')" style="flex:none;padding:8px 14px">متوسط 🟡</div>
-      <div class="mode-chip" id="diffH" onclick="setDiff('hard')" style="flex:none;padding:8px 14px">صعب 🔴</div>
-    </div>
-    <button class="btn-gold" style="width:100%" onclick="openCats()">🎡 اختر فئة السؤال</button>
+  <div class="card" id="hostPanel" style="display:none;text-align:center">
+    <div class="sub">👑 اضغط قارة لتكبيرها، ثم اضغط دولة لفتح مربعات الأسئلة</div>
     <div class="row" style="margin-top:10px">
       <button class="btn-sm" onclick="endGame()">🏁 إنهاء اللعبة</button>
     </div>
@@ -204,12 +228,42 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
   </div>
 </div>
 
-<!-- ═══ نافذة الفئات ═══ -->
+<!-- ═══ شاشة المربعات ═══ -->
+<div class="modal-bg" id="numModal">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-x" id="numCloseBtn" onclick="hostCloseNums()">✕</button>
+    <div class="section" style="margin-top:0;text-align:center" id="numTitle">📍 اختر رقم السؤال</div>
+    <div class="sub" id="numSub" style="text-align:center;margin-bottom:8px"></div>
+    <div class="num-grid" id="numGrid"></div>
+  </div>
+</div>
+
+<!-- ═══ نافذة اختيار الفئة (عجلة/وميض/يدوي) ═══ -->
 <div class="modal-bg" id="catModal">
-  <div class="modal">
-    <button class="modal-x" onclick="document.getElementById('catModal').classList.remove('show')">✕</button>
-    <div class="section" style="margin-top:0">🎡 اختر الفئة</div>
-    <div class="cat-grid" id="catGrid"></div>
+  <div class="modal" style="max-width:440px">
+    <button class="modal-x" id="catCloseBtn" onclick="hostCloseCat()">✕</button>
+    <div class="section" style="margin-top:0;text-align:center" id="catTitle">🎡 عجلة الفئات</div>
+    <div class="catmode-tabs" id="catTabs">
+      <div class="catmode-tab on" id="tabWheel" onclick="hostSetCatMode('wheel')">🎡 عجلة</div>
+      <div class="catmode-tab" id="tabFlash" onclick="hostSetCatMode('flash')">⚡ وميض</div>
+      <div class="catmode-tab" id="tabManual" onclick="hostSetCatMode('manual')">✋ يدوي</div>
+    </div>
+    <div id="wheelPane">
+      <div class="wheel-wrap">
+        <div class="wheel-ptr">🔻</div>
+        <div class="wheel-disc" id="wheelDisc"></div>
+        <button class="wheel-spin-btn" id="spinBtn" onclick="hostSpinWheel()">دوران!</button>
+      </div>
+      <div class="wheel-result" id="wheelResult"></div>
+    </div>
+    <div id="flashPane" style="display:none">
+      <div class="flash-status" id="flashStatus">⚡ الوميض يبدأ الآن...</div>
+      <div class="flash-grid" id="flashGrid"></div>
+      <div class="row" style="margin-top:10px"><button class="btn-gold" id="flashStartBtn" onclick="hostStartFlash()">⚡ ابدأ الوميض</button></div>
+    </div>
+    <div id="manualPane" style="display:none">
+      <div class="cat-grid" id="catGrid"></div>
+    </div>
   </div>
 </div>
 
@@ -306,6 +360,7 @@ function enterRoom(code){
   roomRef.child('players').on('value', s => { players = s.val()||{}; renderAll(); });
   roomRef.child('state').on('value', s => { const old=state; state = s.val()||{}; onStateChange(old); renderAll(); });
   roomRef.child('claimed').on('value', s => { claimed = s.val()||{}; paintMap(); });
+  roomRef.child('usedNums').on('value', s => { usedNums = s.val()||{}; if(state.numScreen) renderNumScreen(); });
   roomRef.child('buzz').on('value', s => {
     const v = s.val()||{}; buzzOrder = Object.keys(v).sort().map(k=>v[k]); renderBuzz();
   });
@@ -367,7 +422,7 @@ function renderGame(){
   document.getElementById('qCard').style.display = q ? 'block' : 'none';
   if(q){
     document.getElementById('qCat').textContent = q.cat;
-    document.getElementById('qDiff').textContent = q.diff==='easy'?'سهل 🟢':q.diff==='medium'?'متوسط 🟡':'صعب 🔴';
+    document.getElementById('qDiff').textContent = '⭐ ' + (q.pts||10) + ' نقطة';
     document.getElementById('qText').textContent = q.q;
     document.getElementById('hostQControls').style.display = isHost ? 'block' : 'none';
     const ab = document.getElementById('answerBox');
@@ -403,6 +458,16 @@ function onStateChange(old){
   if(state.q && (!old || !old.q || old.q.q !== state.q.q)){
     const bb = document.getElementById('buzzBtn'); if(bb) bb.disabled=false;
   }
+  renderNumScreen();
+  renderCatPick();
+  if(state.wheelEvt && state.wheelEvt.id !== lastWheelId){
+    lastWheelId = state.wheelEvt.id;
+    setTimeout(()=>playWheelAnim(state.wheelEvt), 150);
+  }
+  if(state.flashEvt && state.flashEvt.id !== lastFlashId){
+    lastFlashId = state.flashEvt.id;
+    setTimeout(()=>playFlashAnim(state.flashEvt), 150);
+  }
 }
 function renderWin(){
   const list = Object.entries(players);
@@ -425,7 +490,7 @@ function buildMap(){
   svg.innerHTML = WORLD.countries.map((c,i) =>
     `<path d="${c.d}" data-i="${i}" data-cont="${c.continent}" fill="${CONT_COLOR[c.continent]||'#555'}" fill-opacity="0.55"><title>${c.ar||c.name}</title></path>`
   ).join('');
-  svg.querySelectorAll('path').forEach(p => p.addEventListener('click', () => onCountryClick(parseInt(p.dataset.i))));
+  svg.querySelectorAll('path').forEach(p => p.addEventListener('click', () => onCountryClickV2(parseInt(p.dataset.i))));
 }
 function paintMap(){
   svg.querySelectorAll('path').forEach(p => {
@@ -476,27 +541,201 @@ function hostSelectContinent(cont){
   roomRef.child('state/continent').set(cont);
 }
 
-// ═══════════ الأسئلة ═══════════
-let usedQs = new Set();
-function openCats(){
-  const grid = document.getElementById('catGrid');
-  const cats = Object.keys(QDATA.questionBank);
-  grid.innerHTML = cats.map(c=>`<div class="cat-chip" onclick="pickQuestion('${esc(c)}')">${esc(c)}<div class="sub" style="font-size:10px;margin-top:2px">${QDATA.questionBank[c].length} سؤال</div></div>`).join('');
-  document.getElementById('catModal').classList.add('show');
+// ═══════════ الفئات (من اللعبة الأصلية) ═══════════
+const CAT_META = {
+  'جغرافيا':{icon:'🌍',color:'#1a7a3a'},'تاريخ العالم':{icon:'📜',color:'#0a4a3a'},
+  'رياضة':{icon:'⚽',color:'#0a3a5a'},'ثقافة عامة':{icon:'💡',color:'#5a2a0a'},
+  'سياسة':{icon:'🏛️',color:'#1a1a2e'},'دوري أبطال أوروبا':{icon:'🏆',color:'#5a3a00'},
+  'علوم':{icon:'🔬',color:'#004a2a'},'مسلسلات وأفلام':{icon:'🎬',color:'#4a0a6a'},
+  'دين':{icon:'☪️',color:'#3a1a00'},'فن':{icon:'🎨',color:'#4a002a'},
+  'أنمي':{icon:'🎌',color:'#2a004a'},'صح أو خطأ':{icon:'✅',color:'#1a5c1a'},
+  'السيرة النبوية':{icon:'🕌',color:'#4a002a'},'قصص الأنبياء':{icon:'📖',color:'#1a2a3a'},
+  'التاريخ الإسلامي':{icon:'🕌',color:'#2a3a00'},'كأس العالم':{icon:'🌐',color:'#4a0020'},
+  'الدوري السعودي':{icon:'🦅',color:'#001a4a'}
+};
+function getCats(){
+  return Object.keys(QDATA.questionBank).filter(c=>CAT_META[c]).map(c=>({name:c, icon:CAT_META[c].icon, color:CAT_META[c].color}));
 }
-function pickQuestion(cat){
-  document.getElementById('catModal').classList.remove('show');
+const PTS_MAP = {1:10,2:10,3:10,4:10,5:10,6:20,7:20,8:20,9:20,10:20,11:30,12:30,13:30,14:30,15:30,16:40,17:40,18:40,19:40,20:50};
+const NUM_PALETTE = [['#FF563E','#6D180E'],['#E73232','#5E0D0D'],['#D39A18','#5B3605'],['#FFD342','#8B5A05'],['#23B5F6','#063C5B'],['#34D6A1','#064A37'],['#30D892','#064C34'],['#27D1B8','#064A45'],['#1BA5FF','#063A6F'],['#6A64FF','#21195E'],['#8E5DFF','#2D185D'],['#FF4DA6','#67103A'],['#FF3F9A','#621133'],['#A15BFF','#3A1768'],['#FFD13F','#794B05'],['#FF563E','#6D180E'],['#E73232','#5E0D0D'],['#D39A18','#5B3605'],['#FFD342','#8B5A05'],['#23B5F6','#063C5B']];
+
+let usedNums = {}, catMode = 'wheel', wheelRotation = 0, isSpinning = false;
+let lastWheelId = 0, lastFlashId = 0, flashTimer = null, currentPickNum = null;
+let usedQs = new Set();
+
+// ═══ شاشة المربعات (متزامنة للجميع) ═══
+function onCountryClickV2(i){
+  const c = WORLD.countries[i];
+  if(!state.continent){ if(isHost) hostSelectContinent(c.continent); return; }
+  if(!isHost) return;
+  roomRef.child('state/numScreen').set({ country:i, name:(c.ar||c.name) });
+}
+function hostCloseNums(){ if(isHost) roomRef.child('state/numScreen').remove(); }
+function renderNumScreen(){
+  const ns = state.numScreen;
+  const modal = document.getElementById('numModal');
+  if(!ns){ modal.classList.remove('show'); return; }
+  modal.classList.add('show');
+  document.getElementById('numTitle').textContent = '📍 ' + ns.name;
+  document.getElementById('numSub').textContent = isHost ? 'اختر رقم السؤال' : 'المقدم يختار رقم السؤال...';
+  document.getElementById('numCloseBtn').style.display = isHost ? 'block' : 'none';
+  const grid = document.getElementById('numGrid');
+  grid.innerHTML = '';
+  for(let i=1;i<=20;i++){
+    const cell = document.createElement('div');
+    cell.className = 'num-cell';
+    const [ca,cad] = NUM_PALETTE[i-1];
+    cell.style.setProperty('--ca',ca); cell.style.setProperty('--cad',cad);
+    const used = usedNums[i];
+    cell.innerHTML = `<span class="nv">${i}</span><span class="np">${PTS_MAP[i]} نقطة</span>`;
+    if(used){ cell.classList.add('used'); cell.dataset.used = used==='blue'?'🔵':used==='red'?'🔴':'✓'; }
+    else if(isHost) cell.onclick = () => hostPickNum(i);
+    grid.appendChild(cell);
+  }
+}
+function hostPickNum(i){
+  currentPickNum = i;
+  roomRef.child('state').update({ numScreen:null, catPick:{ num:i, pts:PTS_MAP[i], mode:catMode } });
+}
+
+// ═══ نافذة اختيار الفئة (متزامنة) ═══
+function hostSetCatMode(m){
+  catMode = m;
+  if(isHost && state.catPick) roomRef.child('state/catPick/mode').set(m);
+}
+function hostCloseCat(){ if(isHost) roomRef.child('state/catPick').remove(); }
+function renderCatPick(){
+  const cp = state.catPick;
+  const modal = document.getElementById('catModal');
+  if(!cp){ modal.classList.remove('show'); if(flashTimer){clearTimeout(flashTimer);flashTimer=null;} return; }
+  modal.classList.add('show');
+  document.getElementById('catCloseBtn').style.display = isHost ? 'block' : 'none';
+  document.getElementById('catTabs').style.display = isHost ? 'flex' : 'none';
+  ['tabWheel','tabFlash','tabManual'].forEach(id=>document.getElementById(id).classList.remove('on'));
+  const m = cp.mode || 'wheel';
+  document.getElementById('tab'+(m==='wheel'?'Wheel':m==='flash'?'Flash':'Manual')).classList.add('on');
+  document.getElementById('wheelPane').style.display = m==='wheel'?'block':'none';
+  document.getElementById('flashPane').style.display = m==='flash'?'block':'none';
+  document.getElementById('manualPane').style.display = m==='manual'?'block':'none';
+  document.getElementById('catTitle').textContent = m==='wheel'?'🎡 عجلة الفئات':m==='flash'?'⚡ وميض الفئات':'✋ اختر الفئة';
+  if(m==='wheel') buildWheel();
+  if(m==='flash') buildFlashGrid();
+  if(m==='manual') buildManualGrid();
+  document.getElementById('spinBtn').style.display = isHost ? 'block' : 'none';
+  document.getElementById('flashStartBtn').style.display = isHost ? 'inline-block' : 'none';
+}
+
+// ═══ العجلة ═══
+function buildWheel(){
+  const cats = getCats();
+  const disc = document.getElementById('wheelDisc');
+  const seg = 360/cats.length;
+  const stops = cats.map((c,i)=>`${c.color} ${i*seg}deg ${(i+1)*seg}deg`).join(',');
+  disc.style.background = `conic-gradient(${stops})`;
+  disc.innerHTML = cats.map((c,i)=>{
+    const ang = i*seg + seg/2;
+    return `<div style="position:absolute;top:50%;right:50%;transform:rotate(${ang}deg) translateY(-105px) rotate(0deg);transform-origin:center;font-size:16px">${c.icon}</div>`;
+  }).join('');
+}
+function getWheelCatAtAngle(rot){
+  const cats = getCats();
+  const seg = 360/cats.length;
+  const norm = ((rot % 360) + 360) % 360;
+  // المؤشر بالأعلى: الزاوية الفعلية تحت المؤشر
+  const idx = Math.floor(((360 - norm) % 360) / seg);
+  return cats[idx];
+}
+function hostSpinWheel(){
+  if(isSpinning || !isHost) return;
+  const extra = Math.floor(Math.random()*360);
+  const total = 360*10 + extra;
+  wheelRotation += total;
+  const sel = getWheelCatAtAngle(wheelRotation);
+  roomRef.child('state/wheelEvt').set({ id:Date.now(), rot:wheelRotation, cat:sel.name });
+}
+function playWheelAnim(evt){
+  if(isSpinning) return;
+  isSpinning = true;
+  const disc = document.getElementById('wheelDisc');
+  const res = document.getElementById('wheelResult');
+  const btn = document.getElementById('spinBtn');
+  btn.disabled = true; res.textContent = '';
+  wheelRotation = evt.rot;
+  disc.style.transform = `rotate(${evt.rot}deg)`;
+  setTimeout(()=>{
+    isSpinning = false; btn.disabled = false;
+    res.textContent = '✨ الفئة: ' + evt.cat;
+    disc.style.boxShadow = '0 0 40px var(--gold)';
+    setTimeout(()=>{
+      disc.style.boxShadow = '';
+      if(isHost) hostSelectCategory(evt.cat);
+    }, 1500);
+  }, 5100);
+}
+
+// ═══ الوميض ═══
+function buildFlashGrid(){
+  const cats = getCats();
+  const grid = document.getElementById('flashGrid');
+  grid.innerHTML = cats.map((c,i)=>`<div class="flash-card" data-i="${i}" style="background:linear-gradient(135deg,${c.color},${c.color}cc);--fc:${c.color}"><span class="fi">${c.icon}</span><span>${c.name}</span></div>`).join('');
+}
+function hostStartFlash(){
+  if(!isHost) return;
+  const cats = getCats();
+  const winner = cats[Math.floor(Math.random()*cats.length)];
+  roomRef.child('state/flashEvt').set({ id:Date.now(), winner:winner.name });
+}
+function playFlashAnim(evt){
+  const cats = getCats();
+  const winnerIndex = cats.findIndex(c=>c.name===evt.winner);
+  if(winnerIndex<0) return;
+  const cards = Array.from(document.querySelectorAll('#flashGrid .flash-card'));
+  const status = document.getElementById('flashStatus');
+  document.getElementById('flashStartBtn').style.display='none';
+  status.textContent = '⚡ الوميض يبدأ الآن...';
+  let elapsed = 0; const totalDuration = 4000; const baseInterval = 80;
+  function step(){
+    const progress = elapsed / totalDuration;
+    const interval = baseInterval + (progress*progress*420);
+    cards.forEach(c=>c.classList.remove('flash-active'));
+    let next;
+    if(progress > 0.75){
+      const bias = (progress-0.75)/0.25;
+      next = Math.random() < bias*0.7 ? winnerIndex : Math.floor(Math.random()*cats.length);
+    } else next = Math.floor(Math.random()*cats.length);
+    cards[next].classList.add('flash-active');
+    elapsed += interval;
+    if(elapsed < totalDuration) flashTimer = setTimeout(step, interval);
+    else {
+      cards.forEach(c=>c.classList.remove('flash-active'));
+      cards[winnerIndex].classList.add('flash-winner');
+      status.textContent = '✨ الفئة المختارة: ' + evt.winner;
+      setTimeout(()=>{ if(isHost) hostSelectCategory(evt.winner); }, 1800);
+    }
+  }
+  step();
+}
+
+// ═══ اليدوي ═══
+function buildManualGrid(){
+  const grid = document.getElementById('catGrid');
+  grid.innerHTML = getCats().map(c=>`<div class="cat-chip" style="border-color:${c.color}" ${isHost?`onclick="hostSelectCategory('${c.name.replace(/'/g,"\\'")}')"`:''}>${c.icon} ${c.name}</div>`).join('');
+}
+
+// ═══ اختيار الفئة → سؤال ═══
+function hostSelectCategory(cat){
+  if(!isHost || !state.catPick) return;
   const bank = QDATA.questionBank[cat] || [];
-  // فلترة بالصعوبة إن كانت الأسئلة مصنفة، وإلا الكل
-  let pool = bank.filter(q => !q.difficulty || q.difficulty===difficulty);
-  if(!pool.length) pool = bank;
-  pool = pool.filter(q => !usedQs.has(cat+'|'+q.q));
-  if(!pool.length){ usedQs.clear(); pool = bank; }
+  let pool = bank.filter(q => !usedQs.has(cat+'|'+q.q));
+  if(!pool.length){ pool = bank; }
   const q = pool[Math.floor(Math.random()*pool.length)];
   usedQs.add(cat+'|'+q.q);
+  const pts = state.catPick.pts || 10;
+  const num = state.catPick.num;
   roomRef.child('buzz').remove();
-  roomRef.child('state').update({ q: { q:q.q, a:q.a, cat, diff:difficulty }, revealed:false });
+  roomRef.child('state').update({ catPick:null, wheelEvt:null, flashEvt:null, q:{ q:q.q, a:q.a, cat, pts, num } });
 }
+
 function doBuzz(){
   const bb = document.getElementById('buzzBtn'); bb.disabled=true;
   roomRef.child('buzz').push({ pid:myId, name:myName });
@@ -507,14 +746,18 @@ function nextRound(){
   roomRef.child('state').update({ q:null, revealed:false });
 }
 async function award(target){
+  const q = state.q || {};
+  const pts = q.pts || 10;
   const updates = {};
   if(target==='blue' || target==='red'){
-    Object.entries(players).forEach(([id,p])=>{ if(p.team===target) updates['players/'+id+'/score'] = (p.score||0)+10; });
+    Object.entries(players).forEach(([id,p])=>{ if(p.team===target) updates['players/'+id+'/score'] = (p.score||0)+pts; });
+    if(q.num) updates['usedNums/'+q.num] = target;
   } else {
-    updates['players/'+target+'/score'] = ((players[target]||{}).score||0)+10;
+    updates['players/'+target+'/score'] = ((players[target]||{}).score||0)+pts;
+    if(q.num) updates['usedNums/'+q.num] = 'done';
   }
   await roomRef.update(updates);
-  toast('✅ +10 نقاط');
+  toast('✅ +' + pts + ' نقطة');
   checkWin();
 }
 async function checkWin(){
@@ -574,7 +817,7 @@ function hashCode(s){ let h=0; for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCo
 
 // ═══════════ البدء ═══════════
 buildMap();
-console.log('[CC2] BUILD: v1 — دول:', WORLD.countries.length, '| أسئلة:', Object.values(QDATA.questionBank).reduce((a,v)=>a+v.length,0));
+console.log('[CC2] BUILD: v2-wheel-flash-nums — دول:', WORLD.countries.length, '| أسئلة:', Object.values(QDATA.questionBank).reduce((a,v)=>a+v.length,0));
 </script>
 </body>
 </html>
