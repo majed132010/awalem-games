@@ -127,6 +127,10 @@ h1.logo{font-size:34px;font-weight:900;background:linear-gradient(180deg,#FDE68A
           <option value="50">50 نقطة</option>
           <option value="100" selected>100 نقطة</option>
           <option value="200">200 نقطة</option>
+          <option value="c5">🗺️ 5 دول</option>
+          <option value="c10">🗺️ 10 دول</option>
+          <option value="c15">🗺️ 15 دول</option>
+          <option value="c20">🗺️ 20 دولة</option>
         </select>
       </div>
       <button class="btn-gold" onclick="createRoom()">🏰 أنشئ غرفة</button>
@@ -328,9 +332,11 @@ async function createRoom(){
   if(!myName) return toast('اكتب اسمك أول');
   localStorage.setItem('cc_name', myName);
   const code = String(Math.floor(100000 + Math.random()*900000));
-  const target = parseInt(document.getElementById('targetPoints').value);
+  const tv = document.getElementById('targetPoints').value;
+  const winBy = tv.startsWith('c') ? 'countries' : 'points';
+  const target = parseInt(tv.replace('c',''));
   await db.ref('game_rooms/'+code).set({
-    meta: { game:'clash2', hostId:myId, mode, target, status:'lobby', created:Date.now() },
+    meta: { game:'clash2', hostId:myId, mode, target, winBy, status:'lobby', created:Date.now() },
     players: { [myId]: { name:myName, team:'blue', score:0, ts:Date.now() } }
   });
   enterRoom(code);
@@ -399,10 +405,16 @@ function startGame(){ roomRef.child('meta/status').set('playing'); }
 
 function renderGame(){
   const list = Object.entries(players);
-  const blue = list.filter(([,p])=>p.team==='blue').reduce((a,[,p])=>a+(p.score||0),0);
-  const red = list.filter(([,p])=>p.team==='red').reduce((a,[,p])=>a+(p.score||0),0);
-  document.getElementById('scoreBlue').textContent = '🔵 ' + blue;
-  document.getElementById('scoreRed').textContent = '🔴 ' + red;
+  let blue = list.filter(([,p])=>p.team==='blue').reduce((a,[,p])=>a+(p.score||0),0);
+  let red = list.filter(([,p])=>p.team==='red').reduce((a,[,p])=>a+(p.score||0),0);
+  let suffix = '';
+  if((meta.winBy||'points')==='countries'){
+    const counts = {};
+    Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
+    blue = counts.blue||0; red = counts.red||0; suffix = ' 🗺️';
+  }
+  document.getElementById('scoreBlue').textContent = '🔵 ' + blue + suffix;
+  document.getElementById('scoreRed').textContent = '🔴 ' + red + suffix;
   const teamBar = mode==='team';
   document.getElementById('scoreBlue').style.display = teamBar?'block':'none';
   document.getElementById('scoreRed').style.display = teamBar?'block':'none';
@@ -472,6 +484,21 @@ function onStateChange(old){
 function renderWin(){
   const list = Object.entries(players);
   let name, color;
+  if((meta.winBy||'points')==='countries'){
+    const counts = {};
+    Object.values(claimed||{}).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
+    if(mode==='team'){
+      const blue = counts.blue||0, red = counts.red||0;
+      name = blue>=red ? 'الفريق الأزرق 🔵' : 'الفريق الأحمر 🔴';
+      color = blue>=red ? 'var(--blue)' : 'var(--red)';
+    } else {
+      const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+      name = sorted[0] && players[sorted[0][0]] ? players[sorted[0][0]].name : '—';
+      color = 'var(--gold)';
+    }
+    const el0 = document.getElementById('winnerName'); el0.textContent = name; el0.style.color = color;
+    return;
+  }
   if(mode==='team'){
     const blue = list.filter(([,p])=>p.team==='blue').reduce((a,[,p])=>a+(p.score||0),0);
     const red = list.filter(([,p])=>p.team==='red').reduce((a,[,p])=>a+(p.score||0),0);
@@ -530,11 +557,12 @@ function onCountryClick(i){
   }
   document.getElementById('claimModal').classList.add('show');
 }
-function doClaim(owner){
+async function doClaim(owner){
   if(pendingClaim===null) return;
-  roomRef.child('claimed/'+pendingClaim).set(owner);
+  await roomRef.child('claimed/'+pendingClaim).set(owner);
   document.getElementById('claimModal').classList.remove('show');
   pendingClaim = null;
+  checkWin();
 }
 function hostSelectContinent(cont){
   if(!isHost) return;
@@ -779,9 +807,16 @@ async function award(target){
   checkWin();
 }
 async function checkWin(){
+  const target = meta.target||100;
+  if((meta.winBy||'points')==='countries'){
+    const cs = (await roomRef.child('claimed').once('value')).val()||{};
+    const counts = {};
+    Object.values(cs).forEach(o=>{ if(o && o!=='done') counts[o]=(counts[o]||0)+1; });
+    if(Object.values(counts).some(n=>n>=target)) roomRef.child('meta/status').set('finished');
+    return;
+  }
   const snap = await roomRef.child('players').once('value');
   const ps = snap.val()||{};
-  const target = meta.target||100;
   let won = false;
   if(mode==='team'){
     const blue = Object.values(ps).filter(p=>p.team==='blue').reduce((a,p)=>a+(p.score||0),0);
