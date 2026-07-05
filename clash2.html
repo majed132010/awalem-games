@@ -495,13 +495,19 @@ function buildMap(){
   ).join('');
   svg.querySelectorAll('path').forEach(p => p.addEventListener('click', () => onCountryClickV2(parseInt(p.dataset.i))));
 }
+const PLAYER_COLORS = ['#FBBF24','#22C55E','#A855F7','#EC4899','#06B6D4','#F97316','#84CC16','#F43F5E'];
+function playerColor(id){
+  const ids = Object.keys(players).sort();
+  const idx = ids.indexOf(id);
+  return PLAYER_COLORS[(idx<0?0:idx) % PLAYER_COLORS.length];
+}
 function paintMap(){
   svg.querySelectorAll('path').forEach(p => {
     const i = p.dataset.i;
     const owner = claimed[i];
     if(owner==='blue') { p.setAttribute('fill','#3B82F6'); p.setAttribute('fill-opacity','0.95'); }
     else if(owner==='red') { p.setAttribute('fill','#EF4444'); p.setAttribute('fill-opacity','0.95'); }
-    else if(owner) { p.setAttribute('fill','#FBBF24'); p.setAttribute('fill-opacity','0.95'); }
+    else if(owner) { p.setAttribute('fill', playerColor(owner)); p.setAttribute('fill-opacity','0.95'); }
     else { p.setAttribute('fill', CONT_COLOR[p.dataset.cont]||'#555'); p.setAttribute('fill-opacity','0.55'); }
   });
 }
@@ -519,8 +525,17 @@ function updateZoom(){
   }
   if(state.continent && WORLD.continentBounds[state.continent]){
     const b = WORLD.continentBounds[state.continent];
-    const pad = 15;
-    svg.setAttribute('viewBox', `${b.minX-pad} ${b.minY-pad} ${b.maxX-b.minX+pad*2} ${b.maxY-b.minY+pad*2}`);
+    if(state.anchor !== undefined && state.anchor !== null && WORLD.countries[state.anchor]){
+      // زوم على منطقة الدولة المختارة بدل القارة كاملة (يمنع تداخل قارات متجاورة جغرافياً مثل آسيا/شرق أفريقيا)
+      const a = WORLD.countries[state.anchor];
+      const half = 140;
+      let vx = Math.max(b.minX, a.cx-half), vy = Math.max(b.minY, a.cy-half*0.65);
+      let vx2 = Math.min(b.maxX, a.cx+half), vy2 = Math.min(b.maxY, a.cy+half*0.65);
+      svg.setAttribute('viewBox', `${vx} ${vy} ${vx2-vx} ${vy2-vy}`);
+    } else {
+      const pad = 15;
+      svg.setAttribute('viewBox', `${b.minX-pad} ${b.minY-pad} ${b.maxX-b.minX+pad*2} ${b.maxY-b.minY+pad*2}`);
+    }
   } else {
     svg.setAttribute('viewBox','0 0 1000 500');
   }
@@ -551,9 +566,10 @@ async function doClaim(owner){
   pendingClaim = null;
   checkWin();
 }
-function hostSelectContinent(cont){
+function hostSelectContinent(cont, anchor){
   if(!isHost) return;
-  roomRef.child('state/continent').set(cont);
+  const updates = { continent: cont, anchor: (anchor!==undefined?anchor:null) };
+  roomRef.child('state').update(updates);
 }
 function hostGoBack(){
   if(!isHost) return;
@@ -561,6 +577,7 @@ function hostGoBack(){
     roomRef.child('state/country').remove();
   } else {
     roomRef.child('state/continent').remove();
+    roomRef.child('state/anchor').remove();
   }
 }
 
@@ -589,7 +606,7 @@ let usedQs = new Set();
 // ═══ شاشة المربعات (متزامنة للجميع) ═══
 function onCountryClickV2(i){
   const c = WORLD.countries[i];
-  if(!state.continent){ if(isHost) hostSelectContinent(c.continent); return; }
+  if(!state.continent){ if(isHost) hostSelectContinent(c.continent, i); return; }
   if(!isHost) return;
   if(state.country !== i){
     roomRef.child('state/country').set(i);
@@ -796,6 +813,10 @@ async function award(target){
   if(q.country !== undefined && q.country !== null){
     updates['claimed/'+q.country] = target;
   }
+  updates['state/q'] = null;
+  updates['state/revealed'] = false;
+  updates['state/country'] = null;
+  updates['buzz'] = null;
   await roomRef.update(updates);
   toast('👑 تم احتلال الدولة');
   checkWin();
